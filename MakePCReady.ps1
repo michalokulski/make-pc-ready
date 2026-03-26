@@ -52,6 +52,19 @@ $script:appCatalog = @(
     [PSCustomObject]@{ Group = "Gaming"; SubGroup = "Launchers"; Id = "ElectronicArts.EADesktop"; Name = "EA App"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Gaming"; SubGroup = "Launchers"; Id = "Blizzard.BattleNet"; Name = "Battle.net"; DefaultSelected = $false }
 
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Clients"; Id = "Anthropic.Claude"; Name = "Claude Desktop"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Clients"; Id = "Bin-Huang.Chatbox"; Name = "Chatbox"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Local Inference"; Id = "Ollama.Ollama"; Name = "Ollama"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Local Inference"; Id = "ElementLabs.LMStudio"; Name = "LM Studio"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Local Inference"; Id = "AhoyLabs.BackyardAI"; Name = "Backyard AI"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Local Inference"; Id = "CloudStack.Msty"; Name = "Msty"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Local Inference"; Id = "CloudStack.Msty.CPU"; Name = "Msty (CPU)"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Local Inference"; Id = "Jan.Jan"; Name = "Jan"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Local Inference"; Id = "QXYZLabs.Sanctum"; Name = "Sanctum"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Coding Assistants"; Id = "OpenAgentPlatform.Dive"; Name = "Dive"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Coding Assistants"; Id = "SST.opencode"; Name = "opencode"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Coding Assistants"; Id = "Anysphere.Cursor"; Name = "Cursor"; DefaultSelected = $false }
+
     [PSCustomObject]@{ Group = "Runtime Bundles"; SubGroup = "VC++"; Action = "InstallVCRedist"; Name = "Visual C++ Redistributables (Bundle)"; DefaultSelected = $true }
 
     [PSCustomObject]@{ Group = "Platform Features"; SubGroup = "Windows"; Action = "InstallWSL"; Name = "Windows Subsystem for Linux (WSL)"; DefaultSelected = $true }

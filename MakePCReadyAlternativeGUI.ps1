@@ -52,6 +52,19 @@ $script:appCatalog = @(
     [PSCustomObject]@{ Group = "Gaming"; SubGroup = "Launchers"; Id = "ElectronicArts.EADesktop"; Name = "EA App"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Gaming"; SubGroup = "Launchers"; Id = "Blizzard.BattleNet"; Name = "Battle.net"; DefaultSelected = $false }
 
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Clients"; Id = "Anthropic.Claude"; Name = "Claude Desktop"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Clients"; Id = "Bin-Huang.Chatbox"; Name = "Chatbox"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Local Inference"; Id = "Ollama.Ollama"; Name = "Ollama"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Local Inference"; Id = "ElementLabs.LMStudio"; Name = "LM Studio"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Local Inference"; Id = "AhoyLabs.BackyardAI"; Name = "Backyard AI"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Local Inference"; Id = "CloudStack.Msty"; Name = "Msty"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Local Inference"; Id = "CloudStack.Msty.CPU"; Name = "Msty (CPU)"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Local Inference"; Id = "Jan.Jan"; Name = "Jan"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Local Inference"; Id = "QXYZLabs.Sanctum"; Name = "Sanctum"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Coding Assistants"; Id = "OpenAgentPlatform.Dive"; Name = "Dive"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Coding Assistants"; Id = "SST.opencode"; Name = "opencode"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Coding Assistants"; Id = "Anysphere.Cursor"; Name = "Cursor"; DefaultSelected = $false }
+
     [PSCustomObject]@{ Group = "Runtime Bundles"; SubGroup = "VC++"; Action = "InstallVCRedist"; Name = "Visual C++ Redistributables (Bundle)"; DefaultSelected = $true }
 
     [PSCustomObject]@{ Group = "Platform Features"; SubGroup = "Windows"; Action = "InstallWSL"; Name = "Windows Subsystem for Linux (WSL)"; DefaultSelected = $true }
@@ -539,10 +552,12 @@ function Show-InteractiveAppSelector {
     }
 
     $cursor = 0
-    $statusMessage = "Use arrows to move, Space to toggle, Enter to start, Esc to quit."
+    $statusMessage = ""
 
     while ($true) {
-        [Console]::Clear()
+        [Console]::CursorVisible = $false
+        try { [Console]::SetCursorPosition(0, 0) } catch { }
+        $bufferLines = @()
 
         $windowHeight = [Math]::Max(20, $Host.UI.RawUI.WindowSize.Height)
         $visibleRows = [Math]::Max(8, $windowHeight - 10)
@@ -551,11 +566,15 @@ function Show-InteractiveAppSelector {
         $bottomExclusive = [Math]::Min($selection.Count, $topIndex + $visibleRows)
 
         $selectedCount = @($selection | Where-Object { $_.Selected }).Count
+
+        # Build display using Write-Host for color, but use SetCursorPosition for flicker-free refresh
+        [Console]::Clear()
         Write-Host "========================================" -ForegroundColor Cyan
         Write-Host " MakePCReady - Alternative TUI Selector" -ForegroundColor Cyan
         Write-Host "========================================" -ForegroundColor Cyan
-        Write-Host "Keys: Up/Down/Home/End/PageUp/PageDown, Space toggle, A all, N none, Enter start, Esc quit" -ForegroundColor Gray
-        Write-Host ("Selected: {0}/{1}" -f $selectedCount, $selection.Count) -ForegroundColor Gray
+        Write-Host "  Up/Down  move   Space  toggle   A  select all   N  select none" -ForegroundColor DarkGray
+        Write-Host "  PgUp/PgDn/Home/End  scroll      Enter  start    Esc  quit" -ForegroundColor DarkGray
+        Write-Host ("  Selected: {0} of {1}" -f $selectedCount, $selection.Count) -ForegroundColor Gray
         Write-Host ""
 
         $currentGroup = ""
@@ -576,9 +595,21 @@ function Show-InteractiveAppSelector {
             }
 
             $mark = if ($selection[$i].Selected) { "[x]" } else { "[ ]" }
-            $state = if ($selection[$i].IsInstalled) { "(Installed)" } else { "(Not installed)" }
             $pointer = if ($i -eq $cursor) { ">" } else { " " }
-            $line = ("{0} {1,2}. {2} {3} {4}" -f $pointer, ($i + 1), $mark, $selection[$i].Name, $state)
+
+            # Build info tag: show install state + action type for non-package items
+            $infoTag = ""
+            if ($selection[$i].IsInstalled) {
+                $infoTag = "(Installed)"
+            }
+            elseif (-not [string]::IsNullOrWhiteSpace($selection[$i].Action)) {
+                $infoTag = "(Action: $($selection[$i].Action))"
+            }
+            else {
+                $infoTag = "(Not installed)"
+            }
+
+            $line = ("{0} {1,2}. {2} {3} {4}" -f $pointer, ($i + 1), $mark, $selection[$i].Name, $infoTag)
 
             if ($i -eq $cursor) {
                 Write-Host $line -ForegroundColor Yellow
@@ -590,10 +621,13 @@ function Show-InteractiveAppSelector {
 
         Write-Host ""
         if ($selection.Count -gt $visibleRows) {
-            Write-Host ("Showing items {0}-{1} of {2}" -f ($topIndex + 1), $bottomExclusive, $selection.Count) -ForegroundColor DarkGray
+            Write-Host ("  Showing {0}-{1} of {2}" -f ($topIndex + 1), $bottomExclusive, $selection.Count) -ForegroundColor DarkGray
         }
-        Write-Host $statusMessage -ForegroundColor DarkGray
+        if (-not [string]::IsNullOrWhiteSpace($statusMessage)) {
+            Write-Host "  $statusMessage" -ForegroundColor DarkYellow
+        }
 
+        [Console]::CursorVisible = $false
         $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
         $statusMessage = ""
 
@@ -629,9 +663,11 @@ function Show-InteractiveAppSelector {
                 continue
             }
             13 { # Enter
+                [Console]::CursorVisible = $true
                 return $selection | Where-Object { $_.Selected }
             }
             27 { # Escape
+                [Console]::CursorVisible = $true
                 Write-Log "User canceled application selection. Exiting..." -Level "WARNING"
                 exit 0
             }
