@@ -5,6 +5,7 @@ Tired of configuring your PC after a rebuild? This PowerShell script automates t
 ## Features
 
 ✅ **Automated Installation** - Install multiple packages with a single command  
+✅ **Interactive App Selection** - Check/uncheck specific applications before install  
 ✅ **Comprehensive Logging** - All actions logged to a file for debugging  
 ✅ **Error Handling** - Graceful error handling with detailed error messages  
 ✅ **Admin Check** - Verifies admin privileges before running  
@@ -31,10 +32,30 @@ Tired of configuring your PC after a rebuild? This PowerShell script automates t
 .\MakePCReady.ps1
 ```
 
+The script opens an interactive console app selector where you can:
+- Toggle apps by index (for example: `1,3,5`)
+- Select all with `A`
+- Select none with `N`
+- Continue with `S`
+- Quit with `Q`
+
+After app selection, the script asks whether to:
+- Install all Visual C++ Redistributables
+- Install WSL from Winget
+- Enable Hyper-V
+
 ### Custom Log File Location
 
 ```powershell
 .\MakePCReady.ps1 -LogPath "C:\Logs\MySetup.log"
+```
+
+### Non-Interactive Mode
+
+Use defaults and skip the app selection screen:
+
+```powershell
+.\MakePCReady.ps1 -SkipInteractiveSelection
 ```
 
 ### Default Log Location
@@ -83,23 +104,20 @@ PowerShell Version: 7.4.0
 
 ## Customizing Packages
 
-Edit the `$packages` array in `MakePCReady.ps1` to install different applications.
+Edit the `$appCatalog` array at the beginning of `MakePCReady.ps1` to change the available applications.
 
-### Format
+### Catalog Entry Format
 ```powershell
-"WingetPackageId|Display Name"
+[PSCustomObject]@{ Id = "WingetPackageId"; Name = "Display Name"; DefaultSelected = $true }
 ```
 
-### Examples
+### Example
 
 ```powershell
-$packages = @(
-    "Microsoft.VisualStudioCode|Visual Studio Code"
-    "JetBrains.IntelliJIDEA.Community|IntelliJ IDEA"
-    "Python.Python.3.12|Python 3.12"
-    "NodeJS.NodeJS|Node.js"
-    "Docker.Docker|Docker Desktop"
-    "Microsoft.WindowsTerminal|Windows Terminal"
+$appCatalog = @(
+    [PSCustomObject]@{ Id = "Microsoft.VisualStudioCode"; Name = "Visual Studio Code"; DefaultSelected = $true }
+    [PSCustomObject]@{ Id = "Python.Python.3.12"; Name = "Python 3.12"; DefaultSelected = $true }
+    [PSCustomObject]@{ Id = "NodeJS.NodeJS"; Name = "Node.js"; DefaultSelected = $false }
 )
 ```
 
@@ -110,22 +128,25 @@ To find package IDs, run:
 winget search "application name"
 ```
 
-## Default Packages
+## Default Application Catalog
 
-The script comes pre-configured with commonly used packages:
+The interactive selector is pre-loaded with these applications:
 
-| Package | ID | Purpose |
+| Package | ID | Default |
 |---------|-----|---------|
-| 7-Zip | 7zip.7zip | Archive utility |
-| Git | Git.Git | Version control |
-| GitHub Desktop | GitHub.GitHubDesktop | Git client |
-| Visual Studio Code | Microsoft.VisualStudioCode | Code editor |
-| PowerShell 7 | Microsoft.PowerShell | Modern PowerShell |
-| Firefox | Mozilla.Firefox | Web browser |
-| Google Chrome | Google.Chrome | Web browser |
-| Notepad++ | Notepad++.Notepad++ | Text editor |
-| WinRAR | WinRAR.WinRAR | Archive utility |
-| VLC | VideoLAN.VLC | Media player |
+| 7-Zip | 7zip.7zip | Selected |
+| Git | Git.Git | Selected |
+| Visual Studio Code | Microsoft.VisualStudioCode | Selected |
+| PowerShell 7 | Microsoft.PowerShell | Selected |
+| Sysinternals Suite | Microsoft.Sysinternals.Suite | Selected |
+| Notepad++ | Notepad++.Notepad++ | Selected |
+| HWiNFO | REALiX.HWiNFO | Not selected |
+| WinDirStat | WinDirStat.WinDirStat | Not selected |
+
+Optional steps are prompted separately:
+- Visual C++ Redistributables (2005 to 2015+, x86/x64)
+- WSL (`Microsoft.WSL`) via Winget
+- Hyper-V enablement with pre-check and post-check
 
 ## Troubleshooting
 
@@ -159,16 +180,20 @@ Check the log file for specific error messages. Common issues:
 - **Initialize-Log** - Creates and initializes log file
 - **Write-Log** - Logs messages with color coding
 - **Test-AdminPrivileges** - Validates admin rights
-- **Test-Winget** - Checks/installs Winget
+- **Ensure-Winget** - Checks/installs Winget
 - **Update-WingetSources** - Refreshes package sources
-- **Install-Package** - Installs individual packages
+- **Install-Package** - Installs an individual package and validates exit code
 - **Install-Packages** - Batch installation with tracking
+- **Show-InteractiveAppSelector** - Interactive check/uncheck selector
+- **Install-VCRedist** - Installs VC++ redistributables one-by-one
+- **Install-WSLFromWinget** - Installs WSL from Winget package ID
+- **Enable-HyperV** - Checks current state and enables Hyper-V when needed
 - **Invoke-PCSetup** - Main orchestration function
 
 ## Notes
 
 - Installation follows the array order
-- 500ms delay between each package installation
+- 400ms delay between each package installation
 - Failed installations don't stop the process
 - All output appears in console AND log file
 - Requires active internet connection
