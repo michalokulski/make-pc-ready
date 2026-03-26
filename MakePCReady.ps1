@@ -15,16 +15,16 @@ $script:appCatalog = @(
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "General"; Id = "7zip.7zip"; Name = "7-Zip"; DefaultSelected = $true }
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "General"; Id = "Git.Git"; Name = "Git"; DefaultSelected = $true }
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "General"; Id = "Microsoft.VisualStudioCode"; Name = "Visual Studio Code"; DefaultSelected = $true }
-    [PSCustomObject]@{ Group = "Applications"; SubGroup = "General"; Id = "Microsoft.PowerShell"; Name = "PowerShell 7"; DefaultSelected = $true }
-    [PSCustomObject]@{ Group = "Applications"; SubGroup = "General"; Id = "Microsoft.Sysinternals.Suite"; Name = "Sysinternals Suite"; DefaultSelected = $true }
-    [PSCustomObject]@{ Group = "Applications"; SubGroup = "General"; Id = "Notepad++.Notepad++"; Name = "Notepad++"; DefaultSelected = $true }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "General"; Id = "Microsoft.PowerShell"; Name = "PowerShell 7"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "General"; Id = "Microsoft.Sysinternals.Suite"; Name = "Sysinternals Suite"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "General"; Id = "Notepad++.Notepad++"; Name = "Notepad++"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "General"; Id = "WinDirStat.WinDirStat"; Name = "WinDirStat"; DefaultSelected = $false }
 
-    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Browsers and Essentials"; Id = "Google.Chrome"; Name = "Google Chrome"; DefaultSelected = $true }
-    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Browsers and Essentials"; Id = "Mozilla.Firefox"; Name = "Mozilla Firefox"; DefaultSelected = $true }
-    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Browsers and Essentials"; Id = "VideoLAN.VLC"; Name = "VLC Media Player"; DefaultSelected = $true }
-    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Browsers and Essentials"; Id = "Gyan.FFmpeg"; Name = "FFmpeg"; DefaultSelected = $true }
-    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Browsers and Essentials"; Id = "Microsoft.PowerToys"; Name = "Microsoft PowerToys"; DefaultSelected = $true }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Browsers and Essentials"; Id = "Google.Chrome"; Name = "Google Chrome"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Browsers and Essentials"; Id = "Mozilla.Firefox"; Name = "Mozilla Firefox"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Browsers and Essentials"; Id = "VideoLAN.VLC"; Name = "VLC Media Player"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Browsers and Essentials"; Id = "Gyan.FFmpeg"; Name = "FFmpeg"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Browsers and Essentials"; Id = "Microsoft.PowerToys"; Name = "Microsoft PowerToys"; DefaultSelected = $false }
 
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Hardware Tools"; Id = "REALiX.HWiNFO"; Name = "HWiNFO"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Hardware Tools"; Id = "CPUID.CPU-Z"; Name = "CPU-Z"; DefaultSelected = $false }
@@ -36,9 +36,9 @@ $script:appCatalog = @(
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Containers"; Id = "RedHat.Podman"; Name = "Podman CLI"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Containers"; Id = "RedHat.Podman-Desktop"; Name = "Podman Desktop"; DefaultSelected = $false }
 
-    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Python and Data Tools"; Id = "Python.Python.3.13"; Name = "Python 3.13"; DefaultSelected = $true }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Python and Data Tools"; Id = "Python.Python.3.13"; Name = "Python 3.13"; DefaultSelected = $false}
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Python and Data Tools"; Id = "Python.Python.3.12"; Name = "Python 3.12 (Compatibility)"; DefaultSelected = $false }
-    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Python and Data Tools"; Id = "astral-sh.uv"; Name = "uv (Python package/env manager)"; DefaultSelected = $true }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Python and Data Tools"; Id = "astral-sh.uv"; Name = "uv (Python package/env manager)"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Python and Data Tools"; Id = "Anaconda.Miniconda3"; Name = "Miniconda3"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Python and Data Tools"; Id = "Anaconda.Anaconda3"; Name = "Anaconda3"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Python and Data Tools"; Id = "ProjectJupyter.JupyterLab"; Name = "JupyterLab"; DefaultSelected = $false }
@@ -65,9 +65,9 @@ $script:appCatalog = @(
     [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Coding Assistants"; Id = "SST.opencode"; Name = "opencode"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Coding Assistants"; Id = "Anysphere.Cursor"; Name = "Cursor"; DefaultSelected = $false }
 
-    [PSCustomObject]@{ Group = "Runtime Bundles"; SubGroup = "VC++"; Action = "InstallVCRedist"; Name = "Visual C++ Redistributables (Bundle)"; DefaultSelected = $true }
+    [PSCustomObject]@{ Group = "Runtime Bundles"; SubGroup = "VC++"; Action = "InstallVCRedist"; Name = "Visual C++ Redistributables (Bundle)"; DefaultSelected = $false }
 
-    [PSCustomObject]@{ Group = "Platform Features"; SubGroup = "Windows"; Action = "InstallWSL"; Name = "Windows Subsystem for Linux (WSL)"; DefaultSelected = $true }
+    [PSCustomObject]@{ Group = "Platform Features"; SubGroup = "Windows"; Action = "InstallWSL"; Name = "Windows Subsystem for Linux (WSL)"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Platform Features"; SubGroup = "Windows"; Action = "EnableHyperV"; Name = "Hyper-V"; DefaultSelected = $false }
 
     [PSCustomObject]@{ Group = "Maintenance"; SubGroup = "Updates"; Action = "UpgradeAllWingetPackages"; Name = "Upgrade all installed applications via Winget"; DefaultSelected = $false }

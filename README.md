@@ -6,6 +6,7 @@ Tired of configuring your PC after a rebuild? This PowerShell script automates t
 
 ✅ **Automated Installation** - Install multiple packages with a single command  
 ✅ **Interactive App Selection** - Check/uncheck specific applications before install  
+✅ **Alternative TUI Selector** - Arrow-key/space multi-select (Ubuntu installer style, no external modules)  
 ✅ **Comprehensive Logging** - All actions logged to a file for debugging  
 ✅ **Error Handling** - Graceful error handling with detailed error messages  
 ✅ **Admin Check** - Verifies admin privileges before running  
@@ -38,6 +39,24 @@ The script opens an interactive console app selector where you can:
 - Select none with `N`
 - Continue with `S`
 - Quit with `Q`
+
+### Alternative TUI Selector
+
+For an Ubuntu-installer-style experience with arrow keys and space to select:
+
+```powershell
+.\MakePCReadyAlternativeGUI.ps1
+```
+
+Controls:
+- **Up/Down** arrows to move cursor
+- **Space** to toggle selection
+- **A** select all, **N** select none
+- **Home/End/PageUp/PageDown** for fast navigation
+- **Enter** to start installation
+- **Esc** to quit
+
+No external modules required. Works with PowerShell 5.1+.
 
 After app selection:
  - Selected package entries are installed
@@ -175,6 +194,18 @@ The interactive selector is pre-loaded with these applications:
 | Epic Games Launcher | EpicGames.EpicGamesLauncher | Not selected |
 | EA App | ElectronicArts.EADesktop | Not selected |
 | Battle.net | Blizzard.BattleNet | Not selected |
+| Claude Desktop | Anthropic.Claude | Not selected |
+| Chatbox | Bin-Huang.Chatbox | Not selected |
+| Ollama | Ollama.Ollama | Not selected |
+| LM Studio | ElementLabs.LMStudio | Not selected |
+| Backyard AI | AhoyLabs.BackyardAI | Not selected |
+| Msty | CloudStack.Msty | Not selected |
+| Msty (CPU) | CloudStack.Msty.CPU | Not selected |
+| Jan | Jan.Jan | Not selected |
+| Sanctum | QXYZLabs.Sanctum | Not selected |
+| Dive | OpenAgentPlatform.Dive | Not selected |
+| opencode | SST.opencode | Not selected |
+| Cursor | Anysphere.Cursor | Not selected |
 | Visual C++ Redistributables (Bundle) | Action: InstallVCRedist | Selected |
 | WSL | Action: InstallWSL | Selected |
 | Hyper-V | Action: EnableHyperV | Not selected |
