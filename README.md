@@ -161,6 +161,14 @@ The interactive selector is pre-loaded with these applications:
 | Display Driver Uninstaller (DDU) | Wagnardsoft.DisplayDriverUninstaller | Not selected |
 | Podman CLI | RedHat.Podman | Not selected |
 | Podman Desktop | RedHat.Podman-Desktop | Not selected |
+| Python 3.13 | Python.Python.3.13 | Selected |
+| Python 3.12 (Compatibility) | Python.Python.3.12 | Not selected |
+| uv (Python package/env manager) | astral-sh.uv | Selected |
+| Miniconda3 | Anaconda.Miniconda3 | Not selected |
+| Anaconda3 | Anaconda.Anaconda3 | Not selected |
+| JupyterLab | ProjectJupyter.JupyterLab | Not selected |
+| PyCharm Community | JetBrains.PyCharm.Community | Not selected |
+| DBeaver Community | DBeaver.DBeaver.Community | Not selected |
 | Steam | Valve.Steam | Not selected |
 | Ubisoft Connect | Ubisoft.Connect | Not selected |
 | GOG Galaxy | GOG.Galaxy | Not selected |
