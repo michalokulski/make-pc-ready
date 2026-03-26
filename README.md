@@ -39,10 +39,11 @@ The script opens an interactive console app selector where you can:
 - Continue with `S`
 - Quit with `Q`
 
-After app selection, the script asks whether to:
-- Install all Visual C++ Redistributables
-- Install WSL from Winget
-- Enable Hyper-V
+After app selection:
+ - Selected package entries are installed
+ - Selected action entries (VC++ bundle and Windows features) are executed
+ - WSL and Hyper-V are selectable in the same list
+- Optional maintenance actions are available (Winget bulk upgrade and Windows Update trigger)
 
 ### Custom Log File Location
 
@@ -108,16 +109,22 @@ Edit the `$appCatalog` array at the beginning of `MakePCReady.ps1` to change the
 
 ### Catalog Entry Format
 ```powershell
-[PSCustomObject]@{ Id = "WingetPackageId"; Name = "Display Name"; DefaultSelected = $true }
+[PSCustomObject]@{ Group = "Applications"; SubGroup = "General"; Id = "WingetPackageId"; Name = "Display Name"; DefaultSelected = $true }
+```
+
+For action entries (feature/bundle/custom install logic), use:
+
+```powershell
+[PSCustomObject]@{ Group = ".NET"; SubGroup = ".NET Framework"; Action = "EnableDotNetFx35"; Name = ".NET Framework 3.5"; DefaultSelected = $false }
 ```
 
 ### Example
 
 ```powershell
 $appCatalog = @(
-    [PSCustomObject]@{ Id = "Microsoft.VisualStudioCode"; Name = "Visual Studio Code"; DefaultSelected = $true }
-    [PSCustomObject]@{ Id = "Python.Python.3.12"; Name = "Python 3.12"; DefaultSelected = $true }
-    [PSCustomObject]@{ Id = "NodeJS.NodeJS"; Name = "Node.js"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "General"; Id = "Microsoft.VisualStudioCode"; Name = "Visual Studio Code"; DefaultSelected = $true }
+    [PSCustomObject]@{ Group = ".NET"; SubGroup = ".NET Runtime (Core)"; Id = "Microsoft.DotNet.Runtime.10"; Name = ".NET Runtime 10"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Java"; SubGroup = "IBM Semeru JRE (LTS)"; Id = "IBM.Semeru.21.JRE"; Name = "IBM Semeru JRE 21"; DefaultSelected = $false }
 )
 ```
 
@@ -140,13 +147,47 @@ The interactive selector is pre-loaded with these applications:
 | PowerShell 7 | Microsoft.PowerShell | Selected |
 | Sysinternals Suite | Microsoft.Sysinternals.Suite | Selected |
 | Notepad++ | Notepad++.Notepad++ | Selected |
-| HWiNFO | REALiX.HWiNFO | Not selected |
 | WinDirStat | WinDirStat.WinDirStat | Not selected |
+| Google Chrome | Google.Chrome | Selected |
+| Mozilla Firefox | Mozilla.Firefox | Selected |
+| VLC Media Player | VideoLAN.VLC | Selected |
+| FFmpeg | Gyan.FFmpeg | Selected |
+| Microsoft PowerToys | Microsoft.PowerToys | Selected |
+| HWiNFO | REALiX.HWiNFO | Not selected |
+| CPU-Z | CPUID.CPU-Z | Not selected |
+| GPU-Z | TechPowerUp.GPU-Z | Not selected |
+| NVCleanstall | TechPowerUp.NVCleanstall | Not selected |
+| AMD Software: Cloud Edition | AMD.AMDSoftwareCloudEdition | Not selected |
+| Display Driver Uninstaller (DDU) | Wagnardsoft.DisplayDriverUninstaller | Not selected |
+| Podman CLI | RedHat.Podman | Not selected |
+| Podman Desktop | RedHat.Podman-Desktop | Not selected |
+| Steam | Valve.Steam | Not selected |
+| Ubisoft Connect | Ubisoft.Connect | Not selected |
+| GOG Galaxy | GOG.Galaxy | Not selected |
+| Epic Games Launcher | EpicGames.EpicGamesLauncher | Not selected |
+| EA App | ElectronicArts.EADesktop | Not selected |
+| Battle.net | Blizzard.BattleNet | Not selected |
+| Visual C++ Redistributables (Bundle) | Action: InstallVCRedist | Selected |
+| WSL | Action: InstallWSL | Selected |
+| Hyper-V | Action: EnableHyperV | Not selected |
+| Upgrade all installed apps via Winget | Action: UpgradeAllWingetPackages | Not selected |
+| Trigger Windows Update (scan/download/install) | Action: TriggerWindowsUpdate | Not selected |
+| .NET Framework 3.5 | Action: EnableDotNetFx35 | Not selected |
+| .NET Framework 4.x | Action: EnsureDotNetFx4x | Not selected |
+| .NET Runtime 6/8/9/10 | Package IDs | Not selected |
+| .NET Desktop Runtime 6/8/9/10 | Package IDs | Not selected |
+| ASP.NET Core Runtime 6/8/9/10 | Package IDs | Not selected |
+| IBM Semeru JDK 8/11/17/21/25 (LTS) | Package IDs | Not selected |
+| IBM Semeru JRE 8/11/17/21/25 (LTS) | Package IDs | Not selected |
+| Amazon Corretto JDK 8/11/17/21/25 (LTS) | Package IDs | Not selected |
+| Amazon Corretto JRE 8 (LTS) | Package ID | Not selected |
+| Eclipse Adoptium Temurin JDK 8/11/17/21/25 (LTS) | Package IDs | Not selected |
+| Eclipse Adoptium Temurin JRE 8/11/17/21/25 (LTS) | Package IDs | Not selected |
+
+Note: only Corretto JRE 8 is currently available in Winget. Corretto JRE 11/17/21/25 are not published there.
 
 Optional steps are prompted separately:
-- Visual C++ Redistributables (2005 to 2015+, x86/x64)
-- WSL (`Microsoft.WSL`) via Winget
-- Hyper-V enablement with pre-check and post-check
+- None. WSL and Hyper-V are now part of the main selector.
 
 ## Troubleshooting
 
@@ -186,6 +227,10 @@ Check the log file for specific error messages. Common issues:
 - **Install-Packages** - Batch installation with tracking
 - **Show-InteractiveAppSelector** - Interactive check/uncheck selector
 - **Install-VCRedist** - Installs VC++ redistributables one-by-one
+- **Upgrade-AllWingetPackages** - Runs Winget bulk upgrades (`winget upgrade --all -r -h --include-unknown`)
+- **Trigger-WindowsUpdate** - Triggers Windows Update scan/download/install commands
+- **Enable-WindowsFeatureIfNeeded** - Enables Windows optional feature when needed
+- **Ensure-DotNetFramework4x** - Verifies .NET Framework 4.x presence
 - **Install-WSLFromWinget** - Installs WSL from Winget package ID
 - **Enable-HyperV** - Checks current state and enables Hyper-V when needed
 - **Invoke-PCSetup** - Main orchestration function
