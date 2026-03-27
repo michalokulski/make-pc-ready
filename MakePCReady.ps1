@@ -65,7 +65,8 @@ $script:appCatalog = @(
     [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Coding Assistants"; Id = "SST.opencode"; Name = "opencode"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Coding Assistants"; Id = "Anysphere.Cursor"; Name = "Cursor"; DefaultSelected = $false }
 
-    [PSCustomObject]@{ Group = "Runtime Bundles"; SubGroup = "VC++"; Action = "InstallVCRedist"; Name = "Visual C++ Redistributables (Bundle)"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Runtime Bundles"; SubGroup = "VC++"; Action = "InstallVCRedist"; Name = "Visual C++ Redistributables (Install package-by-package)"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Runtime Bundles"; SubGroup = "VC++"; Action = "InstallVCRedistAIO"; Name = "VC Redist AIO (abbodi1406 bundle)"; DefaultSelected = $false }
 
     [PSCustomObject]@{ Group = "Platform Features"; SubGroup = "Windows"; Action = "InstallWSL"; Name = "Windows Subsystem for Linux (WSL)"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Platform Features"; SubGroup = "Windows"; Action = "EnableHyperV"; Name = "Hyper-V"; DefaultSelected = $false }
@@ -122,6 +123,7 @@ $script:appCatalog = @(
 )
 
 $script:installedCache = @{}
+$script:installedCachePrimed = $false
 
 $script:logColors = @{
     "SUCCESS" = "Green"
@@ -144,6 +146,8 @@ $script:vcRedistPackages = @(
     [PSCustomObject]@{ Id = "Microsoft.VCRedist.2015+.x64"; Name = "VC++ 2015+ x64" }
     [PSCustomObject]@{ Id = "Microsoft.VCRedist.2015+.x86"; Name = "VC++ 2015+ x86" }
 )
+
+$script:vcRedistAioPackage = [PSCustomObject]@{ Id = "abbodi1406.vcredist"; Name = "VC Redist AIO (abbodi1406)" }
 
 function Initialize-Log {
     $header = @"
@@ -259,6 +263,61 @@ function Update-WingetSources {
     }
 }
 
+function Initialize-InstalledCacheFromWinget {
+    Write-Log "Creating installed-package snapshot from Winget..." -Level "INFO"
+
+    $result = Invoke-WingetCommand -Arguments @("list", "--output", "json")
+    if ($result.ExitCode -ne 0) {
+        Write-Log "Could not read Winget package list snapshot. Falling back to per-package checks." -Level "WARNING"
+        foreach ($line in $result.StdOut) {
+            Write-Log "winget: $line" -Level "WARNING" -NoConsole
+        }
+        $script:installedCachePrimed = $false
+        return $false
+    }
+
+    $jsonText = ($result.StdOut | Out-String)
+    if ([string]::IsNullOrWhiteSpace($jsonText)) {
+        Write-Log "Winget list snapshot returned no data. Falling back to per-package checks." -Level "WARNING"
+        $script:installedCachePrimed = $false
+        return $false
+    }
+
+    try {
+        $payload = $jsonText | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        Write-Log "Could not parse Winget JSON output. Falling back to per-package checks." -Level "WARNING"
+        $script:installedCachePrimed = $false
+        return $false
+    }
+
+    $packageEntries = @()
+    if ($payload -and ($payload.PSObject.Properties.Name -contains "Sources")) {
+        foreach ($source in @($payload.Sources)) {
+            if ($source -and ($source.PSObject.Properties.Name -contains "Packages")) {
+                $packageEntries += @($source.Packages)
+            }
+        }
+    }
+    elseif ($payload -and ($payload.PSObject.Properties.Name -contains "Packages")) {
+        $packageEntries += @($payload.Packages)
+    }
+
+    $script:installedCache = @{}
+    $detectedCount = 0
+    foreach ($pkg in $packageEntries) {
+        if ($pkg -and ($pkg.PSObject.Properties.Name -contains "PackageIdentifier") -and -not [string]::IsNullOrWhiteSpace($pkg.PackageIdentifier)) {
+            $script:installedCache[$pkg.PackageIdentifier] = $true
+            $detectedCount++
+        }
+    }
+
+    $script:installedCachePrimed = $true
+    Write-Log "Winget snapshot ready. Detected $detectedCount installed package identifiers." -Level "SUCCESS"
+    return $true
+}
+
 function Test-PackageInstalled {
     param (
         [Parameter(Mandatory = $true)]
@@ -268,6 +327,11 @@ function Test-PackageInstalled {
 
     if (-not $Refresh -and $script:installedCache.ContainsKey($PackageId)) {
         return [bool]$script:installedCache[$PackageId]
+    }
+
+    if (-not $Refresh -and $script:installedCachePrimed) {
+        $script:installedCache[$PackageId] = $false
+        return $false
     }
 
     $result = Invoke-WingetCommand -Arguments @("list", "--id", $PackageId, "--exact")
@@ -381,6 +445,7 @@ function Get-CatalogItemInstalledState {
 
     switch ($Item.Action) {
         "InstallVCRedist" { return (Test-BundleInstalled -Packages $script:vcRedistPackages) }
+        "InstallVCRedistAIO" { return (Test-PackageInstalled -PackageId $script:vcRedistAioPackage.Id) }
         "InstallWSL" { return ((Test-PackageInstalled -PackageId "Microsoft.WSL") -or [bool](Get-Command wsl.exe -ErrorAction SilentlyContinue)) }
         "EnableHyperV" { return (Test-WindowsFeatureEnabled -FeatureName "Microsoft-Hyper-V-All") }
         "EnableDotNetFx35" { return (Test-WindowsFeatureEnabled -FeatureName "NetFx3") }
@@ -405,6 +470,10 @@ function Invoke-SelectedAction {
     switch ($Action) {
         "InstallVCRedist" {
             Install-VCRedist | Out-Null
+            return
+        }
+        "InstallVCRedistAIO" {
+            Install-VCRedistAIO | Out-Null
             return
         }
         "InstallWSL" {
@@ -546,74 +615,391 @@ function Show-InteractiveAppSelector {
         }
     })
 
+    if (-not $Host.UI.RawUI) {
+        Write-Log "Interactive console features are unavailable. Falling back to defaults." -Level "WARNING"
+        return $selection | Where-Object { $_.Selected }
+    }
+
+    # Build group/subgroup collapse state from catalog order
+    $groupState = [ordered]@{}
+    $currentGroup = ""
+    $currentSubGroup = ""
+    for ($i = 0; $i -lt $selection.Count; $i++) {
+        $entry = $selection[$i]
+        if ($entry.Group -ne $currentGroup) {
+            $currentGroup = $entry.Group
+            $currentSubGroup = ""
+            if (-not $groupState.Contains($currentGroup)) {
+                $groupState[$currentGroup] = @{ Collapsed = $false; SubGroups = [ordered]@{} }
+            }
+        }
+        if ($entry.SubGroup -ne $currentSubGroup) {
+            $currentSubGroup = $entry.SubGroup
+            if (-not $groupState[$currentGroup].SubGroups.Contains($currentSubGroup)) {
+                $groupState[$currentGroup].SubGroups[$currentSubGroup] = @{ Collapsed = $false }
+            }
+        }
+    }
+
+    $cursorRow = 0
+    $statusMessage = ""
+    $filterText = ""
+    $hideInstalled = $false
+
     while ($true) {
-        Clear-Host
-        Write-Host "========================================" -ForegroundColor Cyan
-        Write-Host " MakePCReady - App Selection" -ForegroundColor Cyan
-        Write-Host "========================================" -ForegroundColor Cyan
-        Write-Host "Toggle apps by typing numbers (comma-separated)." -ForegroundColor Gray
-        Write-Host "Commands: [A]ll, [N]one, [S]tart, [Q]uit" -ForegroundColor Gray
-        Write-Host ""
+        [Console]::CursorVisible = $false
 
-        $currentGroup = ""
-        $currentSubGroup = ""
+        # Build visible rows: Group headers, SubGroup headers, and Items
+        $visibleRows = [System.Collections.ArrayList]::new()
+        $seenGroups = @{}
+        $seenSubGroups = @{}
+
+        # Determine which item indices pass the filter
+        $filteredIndexes = @()
         for ($i = 0; $i -lt $selection.Count; $i++) {
-            if ($selection[$i].Group -ne $currentGroup) {
-                $currentGroup = $selection[$i].Group
-                $currentSubGroup = ""
-                Write-Host ""
-                Write-Host ("---- {0} ----" -f $currentGroup) -ForegroundColor Cyan
+            $entry = $selection[$i]
+            $matchesFilter = [string]::IsNullOrWhiteSpace($filterText) -or
+                ($entry.Name -like "*$filterText*") -or
+                ($entry.Group -like "*$filterText*") -or
+                ($entry.SubGroup -like "*$filterText*")
+            $matchesHide = (-not $hideInstalled) -or (-not [bool]$entry.IsInstalled)
+            if ($matchesFilter -and $matchesHide) {
+                $filteredIndexes += $i
+            }
+        }
+
+        foreach ($i in $filteredIndexes) {
+            $entry = $selection[$i]
+            $g = $entry.Group
+            $sg = $entry.SubGroup
+            $sgKey = "$g|$sg"
+
+            # Add group header if first time seeing this group
+            if (-not $seenGroups.ContainsKey($g)) {
+                [void]$visibleRows.Add(@{ Type = 'Group'; GroupName = $g })
+                $seenGroups[$g] = $true
             }
 
-            if ($selection[$i].SubGroup -ne $currentSubGroup) {
-                $currentSubGroup = $selection[$i].SubGroup
-                if (-not [string]::IsNullOrWhiteSpace($currentSubGroup)) {
-                    Write-Host ("  [{0}]" -f $currentSubGroup) -ForegroundColor DarkCyan
+            # If group is collapsed, skip items
+            if ($groupState[$g].Collapsed) { continue }
+
+            # Add subgroup header if first time seeing it
+            if (-not [string]::IsNullOrWhiteSpace($sg) -and -not $seenSubGroups.ContainsKey($sgKey)) {
+                [void]$visibleRows.Add(@{ Type = 'SubGroup'; GroupName = $g; SubGroupName = $sg })
+                $seenSubGroups[$sgKey] = $true
+            }
+
+            # If subgroup is collapsed, skip items
+            if (-not [string]::IsNullOrWhiteSpace($sg) -and
+                $groupState[$g].SubGroups.Contains($sg) -and
+                $groupState[$g].SubGroups[$sg].Collapsed) { continue }
+
+            [void]$visibleRows.Add(@{ Type = 'Item'; Index = $i })
+        }
+
+        # Clamp cursor
+        if ($visibleRows.Count -eq 0) { $cursorRow = 0 }
+        elseif ($cursorRow -ge $visibleRows.Count) { $cursorRow = $visibleRows.Count - 1 }
+        elseif ($cursorRow -lt 0) { $cursorRow = 0 }
+
+        # Viewport calculations
+        $windowHeight = [Math]::Max(22, $Host.UI.RawUI.WindowSize.Height)
+        $maxVisible = [Math]::Max(6, $windowHeight - 14)
+        $maxTop = [Math]::Max(0, $visibleRows.Count - $maxVisible)
+        $topPos = [Math]::Min($maxTop, [Math]::Max(0, $cursorRow - [int]($maxVisible / 2)))
+        $bottomPos = [Math]::Min($visibleRows.Count, $topPos + $maxVisible)
+
+        # Stats
+        $selectedCount = @($selection | Where-Object { $_.Selected }).Count
+        $installedCount = @($selection | Where-Object { $_.IsInstalled }).Count
+        $totalCount = $selection.Count
+
+        # Render
+        [Console]::Clear()
+        Write-Host ("=" * 72) -ForegroundColor Cyan
+        Write-Host "  MakePCReady - Setup Studio" -ForegroundColor Cyan
+        Write-Host ("=" * 72) -ForegroundColor Cyan
+        Write-Host ("  Selected: {0}/{1}  |  Installed: {2}  |  Visible: {3} rows" -f $selectedCount, $totalCount, $installedCount, $visibleRows.Count) -ForegroundColor Gray
+        Write-Host ("  Filter: {0}  |  Hide installed: {1}" -f $(if ([string]::IsNullOrWhiteSpace($filterText)) { "<none>" } else { $filterText }), $(if ($hideInstalled) { "ON" } else { "OFF" })) -ForegroundColor Gray
+        Write-Host ""
+
+        if ($visibleRows.Count -eq 0) {
+            Write-Host "  No items match current filter/view." -ForegroundColor Yellow
+            Write-Host "  Press F to set filter, R to clear, H to toggle hide-installed." -ForegroundColor DarkYellow
+        }
+        else {
+            for ($r = $topPos; $r -lt $bottomPos; $r++) {
+                $row = $visibleRows[$r]
+                $isCursor = ($r -eq $cursorRow)
+                $pointer = if ($isCursor) { ">" } else { " " }
+
+                switch ($row.Type) {
+                    'Group' {
+                        $gName = $row.GroupName
+                        $gs = $groupState[$gName]
+                        $arrow = if ($gs.Collapsed) { "+" } else { "-" }
+
+                        $gItems = @($selection | Where-Object { $_.Group -eq $gName })
+                        $gSel = @($gItems | Where-Object { $_.Selected }).Count
+                        $gTotal = $gItems.Count
+
+                        $line = " {0} [{1}] {2} ({3}/{4} selected)" -f $pointer, $arrow, $gName, $gSel, $gTotal
+                        if ($isCursor) { Write-Host $line -ForegroundColor Yellow }
+                        else { Write-Host $line -ForegroundColor Cyan }
+                    }
+                    'SubGroup' {
+                        $gName = $row.GroupName
+                        $sgName = $row.SubGroupName
+                        $sgs = $groupState[$gName].SubGroups[$sgName]
+                        $arrow = if ($sgs.Collapsed) { "+" } else { "-" }
+
+                        $sgItems = @($selection | Where-Object { $_.Group -eq $gName -and $_.SubGroup -eq $sgName })
+                        $sgSel = @($sgItems | Where-Object { $_.Selected }).Count
+                        $sgTotal = $sgItems.Count
+
+                        $line = " {0}    [{1}] {2} ({3}/{4})" -f $pointer, $arrow, $sgName, $sgSel, $sgTotal
+                        if ($isCursor) { Write-Host $line -ForegroundColor Yellow }
+                        else { Write-Host $line -ForegroundColor DarkCyan }
+                    }
+                    'Item' {
+                        $entry = $selection[$row.Index]
+                        $mark = if ($entry.Selected) { "[x]" } else { "[ ]" }
+
+                        $tag = ""
+                        if ($entry.IsInstalled) { $tag = "(Installed)" }
+                        elseif (-not [string]::IsNullOrWhiteSpace($entry.Action)) { $tag = "(Action)" }
+                        else { $tag = "(Not installed)" }
+
+                        $line = " {0}        {1} {2}  {3}" -f $pointer, $mark, $entry.Name, $tag
+                        if ($isCursor) { Write-Host $line -ForegroundColor Yellow }
+                        elseif ($entry.IsInstalled) { Write-Host $line -ForegroundColor DarkGray }
+                        else { Write-Host $line }
+                    }
                 }
             }
-
-            $mark = if ($selection[$i].Selected) { "[x]" } else { "[ ]" }
-            $state = if ($selection[$i].IsInstalled) { "(Installed)" } else { "(Not installed)" }
-            Write-Host ("{0,2}. {1} {2} {3}" -f ($i + 1), $mark, $selection[$i].Name, $state)
         }
 
         Write-Host ""
-        $inputValue = Read-Host "Choice"
+        Write-Host "  Up/Down/Home/End/PgUp/PgDn: Navigate   Space: Toggle item or group" -ForegroundColor DarkGray
+        Write-Host "  Left/Right: Collapse/Expand   Tab: Next group   Enter: Start installation" -ForegroundColor DarkGray
+        Write-Host "  A: Select all  N: Select none  F: Filter  R: Reset filter  H: Hide installed  Esc: Quit" -ForegroundColor DarkGray
 
-        if ([string]::IsNullOrWhiteSpace($inputValue)) {
-            continue
+        if ($visibleRows.Count -gt $maxVisible) {
+            Write-Host ("  Showing rows {0}-{1} of {2}" -f ($topPos + 1), $bottomPos, $visibleRows.Count) -ForegroundColor DarkGray
         }
 
-        switch ($inputValue.Trim().ToUpperInvariant()) {
-            "A" {
-                foreach ($entry in $selection) {
-                    $entry.Selected = $true
+        if ($visibleRows.Count -gt 0 -and $cursorRow -lt $visibleRows.Count) {
+            $focusRow = $visibleRows[$cursorRow]
+            switch ($focusRow.Type) {
+                'Group' { Write-Host ("  Focus: {0} (group)" -f $focusRow.GroupName) -ForegroundColor DarkCyan }
+                'SubGroup' { Write-Host ("  Focus: {0} > {1} (subgroup)" -f $focusRow.GroupName, $focusRow.SubGroupName) -ForegroundColor DarkCyan }
+                'Item' {
+                    $fi = $selection[$focusRow.Index]
+                    Write-Host ("  Focus: {0} | {1} > {2}" -f $fi.Name, $fi.Group, $fi.SubGroup) -ForegroundColor DarkCyan
+                }
+            }
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($statusMessage)) {
+            Write-Host "  $statusMessage" -ForegroundColor DarkYellow
+        }
+
+        # Input
+        $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+        $statusMessage = ""
+
+        switch ($key.VirtualKeyCode) {
+            38 { # Up
+                if ($visibleRows.Count -gt 0) {
+                    if ($cursorRow -gt 0) { $cursorRow-- }
+                    else { $cursorRow = $visibleRows.Count - 1 }
                 }
                 continue
             }
-            "N" {
-                foreach ($entry in $selection) {
-                    $entry.Selected = $false
+            40 { # Down
+                if ($visibleRows.Count -gt 0) {
+                    if ($cursorRow -lt $visibleRows.Count - 1) { $cursorRow++ }
+                    else { $cursorRow = 0 }
                 }
                 continue
             }
-            "S" {
-                return $selection | Where-Object { $_.Selected }
+            36 { # Home
+                $cursorRow = 0
+                continue
             }
-            "Q" {
+            35 { # End
+                $cursorRow = [Math]::Max(0, $visibleRows.Count - 1)
+                continue
+            }
+            33 { # PageUp
+                $cursorRow = [Math]::Max(0, $cursorRow - $maxVisible)
+                continue
+            }
+            34 { # PageDown
+                $cursorRow = [Math]::Min([Math]::Max(0, $visibleRows.Count - 1), $cursorRow + $maxVisible)
+                continue
+            }
+            37 { # Left - collapse current or parent group/subgroup
+                if ($visibleRows.Count -gt 0 -and $cursorRow -lt $visibleRows.Count) {
+                    $row = $visibleRows[$cursorRow]
+                    if ($row.Type -eq 'Group') {
+                        $groupState[$row.GroupName].Collapsed = $true
+                    }
+                    elseif ($row.Type -eq 'SubGroup') {
+                        $groupState[$row.GroupName].SubGroups[$row.SubGroupName].Collapsed = $true
+                    }
+                    elseif ($row.Type -eq 'Item') {
+                        $entry = $selection[$row.Index]
+                        if (-not [string]::IsNullOrWhiteSpace($entry.SubGroup) -and
+                            $groupState[$entry.Group].SubGroups.Contains($entry.SubGroup)) {
+                            $groupState[$entry.Group].SubGroups[$entry.SubGroup].Collapsed = $true
+                        }
+                        else {
+                            $groupState[$entry.Group].Collapsed = $true
+                        }
+                    }
+                }
+                continue
+            }
+            39 { # Right - expand group/subgroup
+                if ($visibleRows.Count -gt 0 -and $cursorRow -lt $visibleRows.Count) {
+                    $row = $visibleRows[$cursorRow]
+                    if ($row.Type -eq 'Group') {
+                        $groupState[$row.GroupName].Collapsed = $false
+                    }
+                    elseif ($row.Type -eq 'SubGroup') {
+                        $groupState[$row.GroupName].SubGroups[$row.SubGroupName].Collapsed = $false
+                    }
+                }
+                continue
+            }
+            9 { # Tab - jump to next group header
+                if ($visibleRows.Count -gt 0) {
+                    $found = $false
+                    for ($r = $cursorRow + 1; $r -lt $visibleRows.Count; $r++) {
+                        if ($visibleRows[$r].Type -eq 'Group') {
+                            $cursorRow = $r
+                            $found = $true
+                            break
+                        }
+                    }
+                    if (-not $found) {
+                        for ($r = 0; $r -lt $cursorRow; $r++) {
+                            if ($visibleRows[$r].Type -eq 'Group') {
+                                $cursorRow = $r
+                                break
+                            }
+                        }
+                    }
+                }
+                continue
+            }
+            32 { # Space - toggle item, or toggle all in group/subgroup
+                if ($visibleRows.Count -gt 0 -and $cursorRow -lt $visibleRows.Count) {
+                    $row = $visibleRows[$cursorRow]
+                    switch ($row.Type) {
+                        'Group' {
+                            $gName = $row.GroupName
+                            $gItems = @($selection | Where-Object { $_.Group -eq $gName })
+                            $allSelected = @($gItems | Where-Object { $_.Selected }).Count -eq $gItems.Count
+                            $newState = -not $allSelected
+                            foreach ($item in $gItems) { $item.Selected = $newState }
+                        }
+                        'SubGroup' {
+                            $gName = $row.GroupName
+                            $sgName = $row.SubGroupName
+                            $sgItems = @($selection | Where-Object { $_.Group -eq $gName -and $_.SubGroup -eq $sgName })
+                            $allSelected = @($sgItems | Where-Object { $_.Selected }).Count -eq $sgItems.Count
+                            $newState = -not $allSelected
+                            foreach ($item in $sgItems) { $item.Selected = $newState }
+                        }
+                        'Item' {
+                            $selection[$row.Index].Selected = -not $selection[$row.Index].Selected
+                        }
+                    }
+                }
+                continue
+            }
+            13 { # Enter - confirm selection
+                [Console]::CursorVisible = $true
+                $selectedNow = @($selection | Where-Object { $_.Selected })
+
+                [Console]::Clear()
+                Write-Host ("=" * 72) -ForegroundColor Cyan
+                Write-Host "  Confirm Selection" -ForegroundColor Cyan
+                Write-Host ("=" * 72) -ForegroundColor Cyan
+
+                if ($selectedNow.Count -eq 0) {
+                    Write-Host "  No items selected. Select at least one item before starting." -ForegroundColor Yellow
+                    Write-Host "  Press any key to return..." -ForegroundColor DarkGray
+                    [void]$Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                    continue
+                }
+
+                Write-Host ("  {0} item(s) selected:" -f $selectedNow.Count) -ForegroundColor Gray
+                Write-Host ""
+                $cg = ""
+                foreach ($entry in $selectedNow) {
+                    if ($entry.Group -ne $cg) {
+                        $cg = $entry.Group
+                        Write-Host "  $cg" -ForegroundColor Cyan
+                    }
+                    Write-Host ("    - {0}" -f $entry.Name)
+                }
+
+                Write-Host ""
+                Write-Host "  Start installation?  Y = Yes  |  N = Go back  |  Esc = Quit" -ForegroundColor Yellow
+
+                while ($true) {
+                    $confirmKey = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                    if ($confirmKey.VirtualKeyCode -eq 27) {
+                        Write-Log "User canceled during confirmation. Exiting..." -Level "WARNING"
+                        exit 0
+                    }
+                    $ch = $confirmKey.Character.ToString().ToUpperInvariant()
+                    if ($ch -eq "Y") { return $selectedNow }
+                    if ($ch -eq "N") { break }
+                }
+                continue
+            }
+            27 { # Escape
+                [Console]::CursorVisible = $true
                 Write-Log "User canceled application selection. Exiting..." -Level "WARNING"
                 exit 0
             }
-            default {
-                $tokens = $inputValue -split ","
-                foreach ($token in $tokens) {
-                    $trimmed = $token.Trim()
-                    $index = 0
-                    if ([int]::TryParse($trimmed, [ref]$index)) {
-                        if ($index -ge 1 -and $index -le $selection.Count) {
-                            $selection[$index - 1].Selected = -not $selection[$index - 1].Selected
-                        }
-                    }
+        }
+
+        # Letter key handling
+        if (-not [char]::IsControl($key.Character)) {
+            switch ($key.Character.ToString().ToUpperInvariant()) {
+                "A" {
+                    foreach ($e in $selection) { $e.Selected = $true }
+                    continue
+                }
+                "N" {
+                    foreach ($e in $selection) { $e.Selected = $false }
+                    continue
+                }
+                "H" {
+                    $hideInstalled = -not $hideInstalled
+                    $statusMessage = if ($hideInstalled) { "Hide installed: ON" } else { "Hide installed: OFF" }
+                    continue
+                }
+                "R" {
+                    $filterText = ""
+                    $statusMessage = "Filter cleared."
+                    continue
+                }
+                "F" {
+                    [Console]::CursorVisible = $true
+                    Write-Host ""
+                    $newFilter = Read-Host "  Filter (name/group/subgroup, blank to clear)"
+                    $filterText = $newFilter
+                    $statusMessage = if ([string]::IsNullOrWhiteSpace($filterText)) { "Filter cleared." } else { "Filter: $filterText" }
+                    continue
+                }
+                default {
+                    $statusMessage = "Unknown key. Use arrows, Space, Enter, A, N, F, R, H, Tab, Esc."
                 }
             }
         }
@@ -622,16 +1008,31 @@ function Show-InteractiveAppSelector {
 
 function Install-VCRedist {
     Write-Log "========================================" -Level "INFO"
-    Write-Log "Installing Visual C++ Redistributables..." -Level "INFO"
+    Write-Log "Installing Visual C++ Redistributables (package-by-package)..." -Level "INFO"
     Write-Log "========================================" -Level "INFO"
 
     $result = Install-Packages -Packages $script:vcRedistPackages
     if ($result.Failed -eq 0) {
-        Write-Log "Visual C++ Redistributables completed successfully" -Level "SUCCESS"
+        Write-Log "Visual C++ Redistributables (package-by-package) completed successfully" -Level "SUCCESS"
         return $true
     }
 
-    Write-Log "Visual C++ Redistributables completed with failures" -Level "WARNING"
+    Write-Log "Visual C++ Redistributables (package-by-package) completed with failures" -Level "WARNING"
+    return $false
+}
+
+function Install-VCRedistAIO {
+    Write-Log "========================================" -Level "INFO"
+    Write-Log "Installing VC Redist AIO (abbodi1406.vcredist)..." -Level "INFO"
+    Write-Log "========================================" -Level "INFO"
+
+    $ok = Install-Package -PackageId $script:vcRedistAioPackage.Id -PackageName $script:vcRedistAioPackage.Name
+    if ($ok) {
+        Write-Log "VC Redist AIO completed successfully" -Level "SUCCESS"
+        return $true
+    }
+
+    Write-Log "VC Redist AIO completed with failures" -Level "WARNING"
     return $false
 }
 
@@ -753,6 +1154,8 @@ function Invoke-PCSetup {
     Update-WingetSources
 
     $appCatalog = @($script:appCatalog | ForEach-Object { $_.PSObject.Copy() })
+
+    [void](Initialize-InstalledCacheFromWinget)
 
     Write-Log "Detecting already installed applications in catalog..." -Level "INFO"
     foreach ($app in $appCatalog) {

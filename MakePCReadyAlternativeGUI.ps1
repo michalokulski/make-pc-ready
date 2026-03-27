@@ -65,7 +65,8 @@ $script:appCatalog = @(
     [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Coding Assistants"; Id = "SST.opencode"; Name = "opencode"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "AI/LLM"; SubGroup = "Coding Assistants"; Id = "Anysphere.Cursor"; Name = "Cursor"; DefaultSelected = $false }
 
-    [PSCustomObject]@{ Group = "Runtime Bundles"; SubGroup = "VC++"; Action = "InstallVCRedist"; Name = "Visual C++ Redistributables (Bundle)"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Runtime Bundles"; SubGroup = "VC++"; Action = "InstallVCRedist"; Name = "Visual C++ Redistributables (Install package-by-package)"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Runtime Bundles"; SubGroup = "VC++"; Action = "InstallVCRedistAIO"; Name = "VC Redist AIO (abbodi1406 bundle)"; DefaultSelected = $false }
 
     [PSCustomObject]@{ Group = "Platform Features"; SubGroup = "Windows"; Action = "InstallWSL"; Name = "Windows Subsystem for Linux (WSL)"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Platform Features"; SubGroup = "Windows"; Action = "EnableHyperV"; Name = "Hyper-V"; DefaultSelected = $false }
@@ -122,6 +123,7 @@ $script:appCatalog = @(
 )
 
 $script:installedCache = @{}
+$script:installedCachePrimed = $false
 
 $script:logColors = @{
     "SUCCESS" = "Green"
@@ -144,6 +146,8 @@ $script:vcRedistPackages = @(
     [PSCustomObject]@{ Id = "Microsoft.VCRedist.2015+.x64"; Name = "VC++ 2015+ x64" }
     [PSCustomObject]@{ Id = "Microsoft.VCRedist.2015+.x86"; Name = "VC++ 2015+ x86" }
 )
+
+$script:vcRedistAioPackage = [PSCustomObject]@{ Id = "abbodi1406.vcredist"; Name = "VC Redist AIO (abbodi1406)" }
 
 function Initialize-Log {
     $header = @"
@@ -259,6 +263,61 @@ function Update-WingetSources {
     }
 }
 
+function Initialize-InstalledCacheFromWinget {
+    Write-Log "Creating installed-package snapshot from Winget..." -Level "INFO"
+
+    $result = Invoke-WingetCommand -Arguments @("list", "--output", "json")
+    if ($result.ExitCode -ne 0) {
+        Write-Log "Could not read Winget package list snapshot. Falling back to per-package checks." -Level "WARNING"
+        foreach ($line in $result.StdOut) {
+            Write-Log "winget: $line" -Level "WARNING" -NoConsole
+        }
+        $script:installedCachePrimed = $false
+        return $false
+    }
+
+    $jsonText = ($result.StdOut | Out-String)
+    if ([string]::IsNullOrWhiteSpace($jsonText)) {
+        Write-Log "Winget list snapshot returned no data. Falling back to per-package checks." -Level "WARNING"
+        $script:installedCachePrimed = $false
+        return $false
+    }
+
+    try {
+        $payload = $jsonText | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        Write-Log "Could not parse Winget JSON output. Falling back to per-package checks." -Level "WARNING"
+        $script:installedCachePrimed = $false
+        return $false
+    }
+
+    $packageEntries = @()
+    if ($payload -and ($payload.PSObject.Properties.Name -contains "Sources")) {
+        foreach ($source in @($payload.Sources)) {
+            if ($source -and ($source.PSObject.Properties.Name -contains "Packages")) {
+                $packageEntries += @($source.Packages)
+            }
+        }
+    }
+    elseif ($payload -and ($payload.PSObject.Properties.Name -contains "Packages")) {
+        $packageEntries += @($payload.Packages)
+    }
+
+    $script:installedCache = @{}
+    $detectedCount = 0
+    foreach ($pkg in $packageEntries) {
+        if ($pkg -and ($pkg.PSObject.Properties.Name -contains "PackageIdentifier") -and -not [string]::IsNullOrWhiteSpace($pkg.PackageIdentifier)) {
+            $script:installedCache[$pkg.PackageIdentifier] = $true
+            $detectedCount++
+        }
+    }
+
+    $script:installedCachePrimed = $true
+    Write-Log "Winget snapshot ready. Detected $detectedCount installed package identifiers." -Level "SUCCESS"
+    return $true
+}
+
 function Test-PackageInstalled {
     param (
         [Parameter(Mandatory = $true)]
@@ -268,6 +327,11 @@ function Test-PackageInstalled {
 
     if (-not $Refresh -and $script:installedCache.ContainsKey($PackageId)) {
         return [bool]$script:installedCache[$PackageId]
+    }
+
+    if (-not $Refresh -and $script:installedCachePrimed) {
+        $script:installedCache[$PackageId] = $false
+        return $false
     }
 
     $result = Invoke-WingetCommand -Arguments @("list", "--id", $PackageId, "--exact")
@@ -381,6 +445,7 @@ function Get-CatalogItemInstalledState {
 
     switch ($Item.Action) {
         "InstallVCRedist" { return (Test-BundleInstalled -Packages $script:vcRedistPackages) }
+        "InstallVCRedistAIO" { return (Test-PackageInstalled -PackageId $script:vcRedistAioPackage.Id) }
         "InstallWSL" { return ((Test-PackageInstalled -PackageId "Microsoft.WSL") -or [bool](Get-Command wsl.exe -ErrorAction SilentlyContinue)) }
         "EnableHyperV" { return (Test-WindowsFeatureEnabled -FeatureName "Microsoft-Hyper-V-All") }
         "EnableDotNetFx35" { return (Test-WindowsFeatureEnabled -FeatureName "NetFx3") }
@@ -405,6 +470,10 @@ function Invoke-SelectedAction {
     switch ($Action) {
         "InstallVCRedist" {
             Install-VCRedist | Out-Null
+            return
+        }
+        "InstallVCRedistAIO" {
+            Install-VCRedistAIO | Out-Null
             return
         }
         "InstallWSL" {
@@ -553,118 +622,232 @@ function Show-InteractiveAppSelector {
 
     $cursor = 0
     $statusMessage = ""
+    $filterText = ""
+    $hideInstalled = $false
 
     while ($true) {
         [Console]::CursorVisible = $false
         try { [Console]::SetCursorPosition(0, 0) } catch { }
-        $bufferLines = @()
 
-        $windowHeight = [Math]::Max(20, $Host.UI.RawUI.WindowSize.Height)
-        $visibleRows = [Math]::Max(8, $windowHeight - 10)
-        $maxTop = [Math]::Max(0, $selection.Count - $visibleRows)
-        $topIndex = [Math]::Min($maxTop, [Math]::Max(0, $cursor - [int]($visibleRows / 2)))
-        $bottomExclusive = [Math]::Min($selection.Count, $topIndex + $visibleRows)
+        $viewIndexes = @()
+        for ($i = 0; $i -lt $selection.Count; $i++) {
+            $entry = $selection[$i]
+            $matchesFilter = [string]::IsNullOrWhiteSpace($filterText) -or
+                ($entry.Name -like "*$filterText*") -or
+                ($entry.Group -like "*$filterText*") -or
+                ($entry.SubGroup -like "*$filterText*")
+            $matchesInstalledRule = (-not $hideInstalled) -or (-not [bool]$entry.IsInstalled)
+
+            if ($matchesFilter -and $matchesInstalledRule) {
+                $viewIndexes += $i
+            }
+        }
+
+        if ($viewIndexes.Count -eq 0) {
+            $cursor = 0
+        }
+        elseif ($cursor -notin $viewIndexes) {
+            $cursor = $viewIndexes[0]
+        }
+
+        $windowHeight = [Math]::Max(22, $Host.UI.RawUI.WindowSize.Height)
+        $visibleRows = [Math]::Max(6, $windowHeight - 16)
+
+        $cursorViewPos = [Array]::IndexOf($viewIndexes, $cursor)
+        if ($cursorViewPos -lt 0) { $cursorViewPos = 0 }
+
+        $maxTop = [Math]::Max(0, $viewIndexes.Count - $visibleRows)
+        $topViewPos = [Math]::Min($maxTop, [Math]::Max(0, $cursorViewPos - [int]($visibleRows / 2)))
+        $bottomViewExclusive = [Math]::Min($viewIndexes.Count, $topViewPos + $visibleRows)
 
         $selectedCount = @($selection | Where-Object { $_.Selected }).Count
+        $installedCount = @($selection | Where-Object { $_.IsInstalled }).Count
+        $actionCount = @($selection | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Action) }).Count
 
-        # Build display using Write-Host for color, but use SetCursorPosition for flicker-free refresh
         [Console]::Clear()
         Write-Host "========================================" -ForegroundColor Cyan
-        Write-Host " MakePCReady - Alternative TUI Selector" -ForegroundColor Cyan
+        Write-Host " MakePCReady - Setup Studio" -ForegroundColor Cyan
         Write-Host "========================================" -ForegroundColor Cyan
-        Write-Host "  Up/Down  move   Space  toggle   A  select all   N  select none" -ForegroundColor DarkGray
-        Write-Host "  PgUp/PgDn/Home/End  scroll      Enter  start    Esc  quit" -ForegroundColor DarkGray
-        Write-Host ("  Selected: {0} of {1}" -f $selectedCount, $selection.Count) -ForegroundColor Gray
+        Write-Host ("  Selected: {0}/{1}   Installed: {2}   Actions: {3}" -f $selectedCount, $selection.Count, $installedCount, $actionCount) -ForegroundColor Gray
+        Write-Host ("  View: {0} item(s)   Hide installed (H): {1}" -f $viewIndexes.Count, $(if ($hideInstalled) { "ON" } else { "OFF" })) -ForegroundColor Gray
+        Write-Host ("  Filter (F): {0}" -f $(if ([string]::IsNullOrWhiteSpace($filterText)) { "<none>" } else { $filterText })) -ForegroundColor Gray
         Write-Host ""
 
-        $currentGroup = ""
-        $currentSubGroup = ""
-        for ($i = $topIndex; $i -lt $bottomExclusive; $i++) {
-            if ($selection[$i].Group -ne $currentGroup) {
-                $currentGroup = $selection[$i].Group
-                $currentSubGroup = ""
-                Write-Host ""
-                Write-Host ("---- {0} ----" -f $currentGroup) -ForegroundColor Cyan
-            }
+        if ($viewIndexes.Count -eq 0) {
+            Write-Host "  No items match current view options." -ForegroundColor Yellow
+            Write-Host "  Press F to set filter, R to clear filter, H to toggle hide-installed." -ForegroundColor DarkYellow
+        }
+        else {
+            $currentGroup = ""
+            $currentSubGroup = ""
+            for ($viewPos = $topViewPos; $viewPos -lt $bottomViewExclusive; $viewPos++) {
+                $actualIndex = $viewIndexes[$viewPos]
+                $entry = $selection[$actualIndex]
 
-            if ($selection[$i].SubGroup -ne $currentSubGroup) {
-                $currentSubGroup = $selection[$i].SubGroup
-                if (-not [string]::IsNullOrWhiteSpace($currentSubGroup)) {
-                    Write-Host ("  [{0}]" -f $currentSubGroup) -ForegroundColor DarkCyan
+                if ($entry.Group -ne $currentGroup) {
+                    $currentGroup = $entry.Group
+                    $currentSubGroup = ""
+                    Write-Host ""
+                    Write-Host ("---- {0} ----" -f $currentGroup) -ForegroundColor Cyan
+                }
+
+                if ($entry.SubGroup -ne $currentSubGroup) {
+                    $currentSubGroup = $entry.SubGroup
+                    if (-not [string]::IsNullOrWhiteSpace($currentSubGroup)) {
+                        Write-Host ("  [{0}]" -f $currentSubGroup) -ForegroundColor DarkCyan
+                    }
+                }
+
+                $mark = if ($entry.Selected) { "[x]" } else { "[ ]" }
+                $pointer = if ($actualIndex -eq $cursor) { ">" } else { " " }
+
+                $infoTag = ""
+                if ($entry.IsInstalled) {
+                    $infoTag = "(Installed)"
+                }
+                elseif (-not [string]::IsNullOrWhiteSpace($entry.Action)) {
+                    $infoTag = "(Action: $($entry.Action))"
+                }
+                else {
+                    $infoTag = "(Not installed)"
+                }
+
+                $line = ("{0} {1,2}. {2} {3} {4}" -f $pointer, ($actualIndex + 1), $mark, $entry.Name, $infoTag)
+                if ($actualIndex -eq $cursor) {
+                    Write-Host $line -ForegroundColor Yellow
+                }
+                else {
+                    Write-Host $line
                 }
             }
-
-            $mark = if ($selection[$i].Selected) { "[x]" } else { "[ ]" }
-            $pointer = if ($i -eq $cursor) { ">" } else { " " }
-
-            # Build info tag: show install state + action type for non-package items
-            $infoTag = ""
-            if ($selection[$i].IsInstalled) {
-                $infoTag = "(Installed)"
-            }
-            elseif (-not [string]::IsNullOrWhiteSpace($selection[$i].Action)) {
-                $infoTag = "(Action: $($selection[$i].Action))"
-            }
-            else {
-                $infoTag = "(Not installed)"
-            }
-
-            $line = ("{0} {1,2}. {2} {3} {4}" -f $pointer, ($i + 1), $mark, $selection[$i].Name, $infoTag)
-
-            if ($i -eq $cursor) {
-                Write-Host $line -ForegroundColor Yellow
-            }
-            else {
-                Write-Host $line
-            }
         }
 
         Write-Host ""
-        if ($selection.Count -gt $visibleRows) {
-            Write-Host ("  Showing {0}-{1} of {2}" -f ($topIndex + 1), $bottomExclusive, $selection.Count) -ForegroundColor DarkGray
-        }
-        if (-not [string]::IsNullOrWhiteSpace($statusMessage)) {
-            Write-Host "  $statusMessage" -ForegroundColor DarkYellow
+        Write-Host "  Up/Down/Home/End/PgUp/PgDn: navigate   Space: toggle   Enter: start process" -ForegroundColor DarkGray
+        Write-Host "  A: Select All   N: Select none   F: Filter   R: Clear filter   H: Hide installed   Esc: quit script" -ForegroundColor DarkGray
+
+        if ($viewIndexes.Count -gt $visibleRows) {
+            Write-Host ("  Showing {0}-{1} of {2} in current view" -f ($topViewPos + 1), $bottomViewExclusive, $viewIndexes.Count) -ForegroundColor DarkGray
         }
 
-        [Console]::CursorVisible = $false
+        if ($viewIndexes.Count -gt 0) {
+            $focusItem = $selection[$cursor]
+            Write-Host ("  Focus: {0} | Group: {1} | SubGroup: {2}" -f $focusItem.Name, $focusItem.Group, $focusItem.SubGroup) -ForegroundColor DarkCyan
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($statusMessage)) {
+            Write-Host ("  {0}" -f $statusMessage) -ForegroundColor DarkYellow
+        }
+
         $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
         $statusMessage = ""
 
         switch ($key.VirtualKeyCode) {
             38 { # Up
-                $cursor--
-                if ($cursor -lt 0) { $cursor = $selection.Count - 1 }
+                if ($viewIndexes.Count -gt 0) {
+                    $cursorViewPos = [Array]::IndexOf($viewIndexes, $cursor)
+                    if ($cursorViewPos -lt 0) { $cursorViewPos = 0 }
+                    $cursorViewPos--
+                    if ($cursorViewPos -lt 0) { $cursorViewPos = $viewIndexes.Count - 1 }
+                    $cursor = $viewIndexes[$cursorViewPos]
+                }
                 continue
             }
             40 { # Down
-                $cursor++
-                if ($cursor -ge $selection.Count) { $cursor = 0 }
+                if ($viewIndexes.Count -gt 0) {
+                    $cursorViewPos = [Array]::IndexOf($viewIndexes, $cursor)
+                    if ($cursorViewPos -lt 0) { $cursorViewPos = 0 }
+                    $cursorViewPos++
+                    if ($cursorViewPos -ge $viewIndexes.Count) { $cursorViewPos = 0 }
+                    $cursor = $viewIndexes[$cursorViewPos]
+                }
                 continue
             }
             36 { # Home
-                $cursor = 0
+                if ($viewIndexes.Count -gt 0) {
+                    $cursor = $viewIndexes[0]
+                }
                 continue
             }
             35 { # End
-                $cursor = $selection.Count - 1
+                if ($viewIndexes.Count -gt 0) {
+                    $cursor = $viewIndexes[$viewIndexes.Count - 1]
+                }
                 continue
             }
             33 { # PageUp
-                $cursor = [Math]::Max(0, $cursor - $visibleRows)
+                if ($viewIndexes.Count -gt 0) {
+                    $cursorViewPos = [Array]::IndexOf($viewIndexes, $cursor)
+                    if ($cursorViewPos -lt 0) { $cursorViewPos = 0 }
+                    $cursorViewPos = [Math]::Max(0, $cursorViewPos - $visibleRows)
+                    $cursor = $viewIndexes[$cursorViewPos]
+                }
                 continue
             }
             34 { # PageDown
-                $cursor = [Math]::Min($selection.Count - 1, $cursor + $visibleRows)
+                if ($viewIndexes.Count -gt 0) {
+                    $cursorViewPos = [Array]::IndexOf($viewIndexes, $cursor)
+                    if ($cursorViewPos -lt 0) { $cursorViewPos = 0 }
+                    $cursorViewPos = [Math]::Min($viewIndexes.Count - 1, $cursorViewPos + $visibleRows)
+                    $cursor = $viewIndexes[$cursorViewPos]
+                }
+                continue
+            }
+            37 { # Left
+                continue
+            }
+            39 { # Right
                 continue
             }
             32 { # Space
-                $selection[$cursor].Selected = -not $selection[$cursor].Selected
+                if ($viewIndexes.Count -gt 0) {
+                    $selection[$cursor].Selected = -not $selection[$cursor].Selected
+                }
                 continue
             }
             13 { # Enter
                 [Console]::CursorVisible = $true
-                return $selection | Where-Object { $_.Selected }
+                $selectedNow = @($selection | Where-Object { $_.Selected })
+
+                [Console]::Clear()
+                Write-Host "========================================" -ForegroundColor Cyan
+                Write-Host " Confirm Selection" -ForegroundColor Cyan
+                Write-Host "========================================" -ForegroundColor Cyan
+
+                if ($selectedNow.Count -eq 0) {
+                    Write-Host "No items selected. Select at least one item before starting." -ForegroundColor Yellow
+                    Write-Host "Press any key to return to the selector..." -ForegroundColor DarkGray
+                    [void]$Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                    continue
+                }
+
+                Write-Host ("You selected {0} item(s):" -f $selectedNow.Count) -ForegroundColor Gray
+                Write-Host ""
+                foreach ($entry in $selectedNow) {
+                    Write-Host ("  - {0}" -f $entry.Name)
+                }
+
+                Write-Host ""
+                Write-Host "Are you sure you want to start installation?" -ForegroundColor Yellow
+                Write-Host "Y = Yes, start | N = No, go back | Esc = quit script" -ForegroundColor DarkGray
+
+                while ($true) {
+                    $confirmKey = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                    if ($confirmKey.VirtualKeyCode -eq 27) {
+                        Write-Log "User canceled application selection during confirmation. Exiting..." -Level "WARNING"
+                        exit 0
+                    }
+
+                    $confirmChar = $confirmKey.Character.ToString().ToUpperInvariant()
+                    if ($confirmChar -eq "Y") {
+                        return $selectedNow
+                    }
+                    if ($confirmChar -eq "N") {
+                        break
+                    }
+                }
+
+                continue
             }
             27 { # Escape
                 [Console]::CursorVisible = $true
@@ -673,38 +856,73 @@ function Show-InteractiveAppSelector {
             }
         }
 
-        switch ($key.Character.ToString().ToUpperInvariant()) {
-            "A" {
-                foreach ($entry in $selection) {
-                    $entry.Selected = $true
+        if (-not [char]::IsControl($key.Character)) {
+            switch ($key.Character.ToString().ToUpperInvariant()) {
+                "A" {
+                    foreach ($entry in $selection) {
+                        $entry.Selected = $true
+                    }
+                    continue
                 }
-                continue
-            }
-            "N" {
-                foreach ($entry in $selection) {
-                    $entry.Selected = $false
+                "N" {
+                    foreach ($entry in $selection) {
+                        $entry.Selected = $false
+                    }
+                    continue
                 }
-                continue
+                "H" {
+                    $hideInstalled = -not $hideInstalled
+                    $statusMessage = if ($hideInstalled) { "Hide installed is now ON." } else { "Hide installed is now OFF." }
+                    continue
+                }
+                "R" {
+                    $filterText = ""
+                    $statusMessage = "Filter cleared."
+                    continue
+                }
+                "F" {
+                    [Console]::CursorVisible = $true
+                    Write-Host ""
+                    $newFilter = Read-Host "Filter text (name/group/subgroup, blank to clear)"
+                    $filterText = $newFilter
+                    $statusMessage = if ([string]::IsNullOrWhiteSpace($filterText)) { "Filter cleared." } else { "Filter applied: $filterText" }
+                    continue
+                }
+                default { $statusMessage = "Unsupported key. Use Space, arrows, Enter, A, N, F, R, H, Esc." }
             }
-            default { $statusMessage = "Unsupported key. Use Space, arrows, Enter, A, N, Esc." }
         }
     }
 }
 
 function Install-VCRedist {
     Write-Log "========================================" -Level "INFO"
-    Write-Log "Installing Visual C++ Redistributables..." -Level "INFO"
+    Write-Log "Installing Visual C++ Redistributables (package-by-package)..." -Level "INFO"
     Write-Log "========================================" -Level "INFO"
 
     $result = Install-Packages -Packages $script:vcRedistPackages
     if ($result.Failed -eq 0) {
-        Write-Log "Visual C++ Redistributables completed successfully" -Level "SUCCESS"
+        Write-Log "Visual C++ Redistributables (package-by-package) completed successfully" -Level "SUCCESS"
         return $true
     }
 
-    Write-Log "Visual C++ Redistributables completed with failures" -Level "WARNING"
+        Write-Log "Visual C++ Redistributables (package-by-package) completed with failures" -Level "WARNING"
     return $false
 }
+
+    function Install-VCRedistAIO {
+        Write-Log "========================================" -Level "INFO"
+        Write-Log "Installing VC Redist AIO (abbodi1406.vcredist)..." -Level "INFO"
+        Write-Log "========================================" -Level "INFO"
+
+        $ok = Install-Package -PackageId $script:vcRedistAioPackage.Id -PackageName $script:vcRedistAioPackage.Name
+        if ($ok) {
+            Write-Log "VC Redist AIO completed successfully" -Level "SUCCESS"
+            return $true
+        }
+
+        Write-Log "VC Redist AIO completed with failures" -Level "WARNING"
+        return $false
+    }
 
 function Install-WSLFromWinget {
     Write-Log "========================================" -Level "INFO"
@@ -824,6 +1042,8 @@ function Invoke-PCSetup {
     Update-WingetSources
 
     $appCatalog = @($script:appCatalog | ForEach-Object { $_.PSObject.Copy() })
+
+    [void](Initialize-InstalledCacheFromWinget)
 
     Write-Log "Detecting already installed applications in catalog..." -Level "INFO"
     foreach ($app in $appCatalog) {
