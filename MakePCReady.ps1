@@ -19,12 +19,16 @@ $script:appCatalog = @(
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "General"; Id = "Microsoft.Sysinternals.Suite"; Name = "Sysinternals Suite"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "General"; Id = "Notepad++.Notepad++"; Name = "Notepad++"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "General"; Id = "WinDirStat.WinDirStat"; Name = "WinDirStat"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "General"; Id = "Microsoft.WindowsTerminal"; Name = "Windows Terminal"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "General"; Id = "voidtools.Everything"; Name = "Everything (File Search)"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "General"; Id = "DevToys-app.DevToys"; Name = "DevToys"; DefaultSelected = $false }
 
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Browsers and Essentials"; Id = "Google.Chrome"; Name = "Google Chrome"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Browsers and Essentials"; Id = "Mozilla.Firefox"; Name = "Mozilla Firefox"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Browsers and Essentials"; Id = "VideoLAN.VLC"; Name = "VLC Media Player"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Browsers and Essentials"; Id = "Gyan.FFmpeg"; Name = "FFmpeg"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Browsers and Essentials"; Id = "Microsoft.PowerToys"; Name = "Microsoft PowerToys"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Browsers and Essentials"; Id = "Brave.Brave"; Name = "Brave Browser"; DefaultSelected = $false }
 
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Hardware Tools"; Id = "REALiX.HWiNFO"; Name = "HWiNFO"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Hardware Tools"; Id = "CPUID.CPU-Z"; Name = "CPU-Z"; DefaultSelected = $false }
@@ -32,9 +36,17 @@ $script:appCatalog = @(
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Hardware Tools"; Id = "TechPowerUp.NVCleanstall"; Name = "NVCleanstall (NVIDIA Driver Cleaner/Installer)"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Hardware Tools"; Id = "AMD.AMDSoftwareCloudEdition"; Name = "AMD Software: Cloud Edition"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Hardware Tools"; Id = "Wagnardsoft.DisplayDriverUninstaller"; Name = "Display Driver Uninstaller (DDU)"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Hardware Tools"; Id = "CrystalDewWorld.CrystalDiskInfo"; Name = "CrystalDiskInfo"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Hardware Tools"; Id = "CrystalDewWorld.CrystalDiskMark"; Name = "CrystalDiskMark"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Hardware Tools"; Id = "CPUID.HWMonitor"; Name = "HWMonitor"; DefaultSelected = $false }
 
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Containers"; Id = "RedHat.Podman"; Name = "Podman CLI"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Containers"; Id = "RedHat.Podman-Desktop"; Name = "Podman Desktop"; DefaultSelected = $false }
+
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Developer Tools"; Id = "OpenJS.NodeJS.LTS"; Name = "Node.js LTS"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Developer Tools"; Id = "GitHub.cli"; Name = "GitHub CLI"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Developer Tools"; Id = "GitHub.GitHubDesktop"; Name = "GitHub Desktop"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Developer Tools"; Id = "JanDeDobbeleer.OhMyPosh"; Name = "Oh My Posh"; DefaultSelected = $false }
 
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Python and Data Tools"; Id = "Python.Python.3.13"; Name = "Python 3.13"; DefaultSelected = $false}
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Python and Data Tools"; Id = "Python.Python.3.12"; Name = "Python 3.12 (Compatibility)"; DefaultSelected = $false }
@@ -44,6 +56,19 @@ $script:appCatalog = @(
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Python and Data Tools"; Id = "ProjectJupyter.JupyterLab"; Name = "JupyterLab"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Python and Data Tools"; Id = "JetBrains.PyCharm.Community"; Name = "PyCharm Community"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Applications"; SubGroup = "Python and Data Tools"; Id = "DBeaver.DBeaver.Community"; Name = "DBeaver Community"; DefaultSelected = $false }
+
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Media"; Id = "OBSProject.OBSStudio"; Name = "OBS Studio"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Media"; Id = "Spotify.Spotify"; Name = "Spotify"; DefaultSelected = $false }
+
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Communication"; Id = "Discord.Discord"; Name = "Discord"; DefaultSelected = $false }
+
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Networking"; Id = "PuTTY.PuTTY"; Name = "PuTTY"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Networking"; Id = "WinSCP.WinSCP"; Name = "WinSCP"; DefaultSelected = $false }
+
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "System Utilities"; Id = "Rufus.Rufus"; Name = "Rufus"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "System Utilities"; Id = "Ventoy.Ventoy"; Name = "Ventoy"; DefaultSelected = $false }
+
+    [PSCustomObject]@{ Group = "Applications"; SubGroup = "Productivity"; Id = "TheDocumentFoundation.LibreOffice"; Name = "LibreOffice"; DefaultSelected = $false }
 
     [PSCustomObject]@{ Group = "Gaming"; SubGroup = "Launchers"; Id = "Valve.Steam"; Name = "Steam"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Gaming"; SubGroup = "Launchers"; Id = "Ubisoft.Connect"; Name = "Ubisoft Connect"; DefaultSelected = $false }
@@ -70,6 +95,7 @@ $script:appCatalog = @(
 
     [PSCustomObject]@{ Group = "Platform Features"; SubGroup = "Windows"; Action = "InstallWSL"; Name = "Windows Subsystem for Linux (WSL)"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Platform Features"; SubGroup = "Windows"; Action = "EnableHyperV"; Name = "Hyper-V"; DefaultSelected = $false }
+    [PSCustomObject]@{ Group = "Platform Features"; SubGroup = "Virtualization"; Id = "Oracle.VirtualBox"; Name = "VirtualBox"; DefaultSelected = $false }
 
     [PSCustomObject]@{ Group = "Maintenance"; SubGroup = "Updates"; Action = "UpgradeAllWingetPackages"; Name = "Upgrade all installed applications via Winget"; DefaultSelected = $false }
     [PSCustomObject]@{ Group = "Maintenance"; SubGroup = "Updates"; Action = "TriggerWindowsUpdate"; Name = "Trigger Windows Update (scan/download/install)"; DefaultSelected = $false }
