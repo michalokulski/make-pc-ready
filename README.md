@@ -6,13 +6,13 @@ Tired of configuring your PC after a rebuild? This PowerShell script automates t
 
 ✅ **Collapsible Tree TUI** - Full keyboard-driven selector with collapsible groups/subgroups  
 ✅ **112+ Package Catalog** - Applications, gaming, AI/LLM, runtimes, .NET, Java, and more  
-✅ **Smart Installed Detection** - Batch JSON snapshot from `winget list` marks already-installed items  
+✅ **Smart Installed Detection** - Dual-strategy detection: JSON snapshot (`winget list --output json`) on v1.6+, with automatic text table parsing fallback for older Winget versions  
 ✅ **Filter & Hide Installed** - Real-time text filter and toggle to hide already-installed packages  
 ✅ **WPF GUI Alternative** - A separate WPF-based graphical interface for the same catalog  
 ✅ **Comprehensive Logging** - All actions logged to a timestamped file  
 ✅ **Error Handling** - Graceful error handling with detailed error messages  
 ✅ **Admin Check** - Verifies admin privileges before running  
-✅ **Winget Management** - Checks, installs, and updates Winget automatically  
+✅ **Winget Management** - Checks, installs, and self-upgrades Winget (via `Microsoft.AppInstaller`) automatically  
 ✅ **Progress Tracking** - Real-time console output + file logging  
 ✅ **Summary Report** - Installation summary with success/failure counts  
 
@@ -112,9 +112,11 @@ PowerShell Version: 7.4.0
 
 14:30:46 [SUCCESS] Administrator privileges verified
 14:30:47 [INFO] Checking for Winget installation...
-14:30:48 [SUCCESS] Winget found: v1.6.x.x
-14:30:49 [INFO] Updating Winget package sources...
-14:30:55 [SUCCESS] Winget sources updated successfully
+14:30:48 [SUCCESS] Winget found: v1.12.470
+14:30:48 [INFO] Checking for Winget (App Installer) updates...
+14:30:52 [SUCCESS] Winget upgraded: v1.12.470 -> v1.13.123
+14:30:53 [INFO] Updating Winget package sources...
+14:30:59 [SUCCESS] Winget sources updated successfully
 14:31:00 [INFO] ======== Starting package installation ========
 14:31:02 [INFO] Installing: 7-Zip (7zip.7zip)...
 14:31:15 [SUCCESS] ✓ Successfully installed: 7-Zip
@@ -311,18 +313,22 @@ Check the log file for specific error messages. Common issues:
 - **Initialize-Log** - Creates and initializes log file
 - **Write-Log** - Logs messages with color coding
 - **Test-AdminPrivileges** - Validates admin rights
-- **Ensure-Winget** - Checks/installs Winget
+- **Ensure-Winget** - Checks/installs Winget and self-upgrades via `Microsoft.AppInstaller`
+- **Initialize-InstalledCacheFromWinget** - Builds installed-package cache using JSON or text table fallback
+- **Get-CatalogItemInstalledState** - Checks a catalog item against the installed cache
 - **Update-WingetSources** - Refreshes package sources
 - **Install-Package** - Installs an individual package and validates exit code
 - **Install-Packages** - Batch installation with tracking
-- **Show-InteractiveAppSelector** - Interactive check/uncheck selector
+- **Show-InteractiveAppSelector** - Collapsible tree TUI selector with filter and hide-installed
 - **Install-VCRedist** - Installs VC++ redistributables one-by-one
+- **Install-VCRedistAIO** - Installs VC++ Redistributable AIO package
 - **Upgrade-AllWingetPackages** - Runs Winget bulk upgrades (`winget upgrade --all -r -h --include-unknown`)
 - **Trigger-WindowsUpdate** - Triggers Windows Update scan/download/install commands
 - **Enable-WindowsFeatureIfNeeded** - Enables Windows optional feature when needed
 - **Ensure-DotNetFramework4x** - Verifies .NET Framework 4.x presence
 - **Install-WSLFromWinget** - Installs WSL from Winget package ID
 - **Enable-HyperV** - Checks current state and enables Hyper-V when needed
+- **Invoke-SelectedAction** - Dispatches a catalog entry to its install handler
 - **Invoke-PCSetup** - Main orchestration function
 
 ## Notes

@@ -246,7 +246,34 @@ function Ensure-Winget {
     if ($winget) {
         $versionInfo = Invoke-WingetCommand -Arguments @("--version")
         if ($versionInfo.ExitCode -eq 0) {
-            Write-Log "Winget found: $($versionInfo.StdOut | Select-Object -First 1)" -Level "SUCCESS"
+            $currentVersion = "$($versionInfo.StdOut | Select-Object -First 1)".Trim()
+            Write-Log "Winget found: $currentVersion" -Level "SUCCESS"
+
+            # Attempt to upgrade winget (App Installer) itself
+            Write-Log "Checking for Winget (App Installer) updates..." -Level "INFO"
+            $upgradeResult = Invoke-WingetCommand -Arguments @(
+                "upgrade", "--id", "Microsoft.AppInstaller",
+                "--accept-source-agreements", "--accept-package-agreements", "--silent"
+            )
+            if ($upgradeResult.ExitCode -eq 0) {
+                $newVersionInfo = Invoke-WingetCommand -Arguments @("--version")
+                $newVersion = "$($newVersionInfo.StdOut | Select-Object -First 1)".Trim()
+                if ($newVersion -ne $currentVersion) {
+                    Write-Log "Winget upgraded: $currentVersion -> $newVersion" -Level "SUCCESS"
+                }
+                else {
+                    Write-Log "Winget is already up to date ($currentVersion)" -Level "SUCCESS"
+                }
+            }
+            else {
+                $outputText = ($upgradeResult.StdOut | Out-String)
+                if ($outputText -match "No applicable update found|No available upgrade") {
+                    Write-Log "Winget is already up to date ($currentVersion)" -Level "SUCCESS"
+                }
+                else {
+                    Write-Log "Could not upgrade Winget automatically. Continuing with $currentVersion." -Level "WARNING"
+                }
+            }
             return $true
         }
     }
@@ -292,55 +319,102 @@ function Update-WingetSources {
 function Initialize-InstalledCacheFromWinget {
     Write-Log "Creating installed-package snapshot from Winget..." -Level "INFO"
 
+    # --- Strategy 1: JSON output (winget >= v1.6) ---
     $result = Invoke-WingetCommand -Arguments @("list", "--output", "json")
-    if ($result.ExitCode -ne 0) {
-        Write-Log "Could not read Winget package list snapshot. Falling back to per-package checks." -Level "WARNING"
-        foreach ($line in $result.StdOut) {
-            Write-Log "winget: $line" -Level "WARNING" -NoConsole
-        }
-        $script:installedCachePrimed = $false
-        return $false
-    }
+    if ($result.ExitCode -eq 0) {
+        $jsonText = ($result.StdOut | Out-String)
+        if (-not [string]::IsNullOrWhiteSpace($jsonText)) {
+            try {
+                $payload = $jsonText | ConvertFrom-Json -ErrorAction Stop
 
-    $jsonText = ($result.StdOut | Out-String)
-    if ([string]::IsNullOrWhiteSpace($jsonText)) {
-        Write-Log "Winget list snapshot returned no data. Falling back to per-package checks." -Level "WARNING"
-        $script:installedCachePrimed = $false
-        return $false
-    }
+                $packageEntries = @()
+                if ($payload -and ($payload.PSObject.Properties.Name -contains "Sources")) {
+                    foreach ($source in @($payload.Sources)) {
+                        if ($source -and ($source.PSObject.Properties.Name -contains "Packages")) {
+                            $packageEntries += @($source.Packages)
+                        }
+                    }
+                }
+                elseif ($payload -and ($payload.PSObject.Properties.Name -contains "Packages")) {
+                    $packageEntries += @($payload.Packages)
+                }
 
-    try {
-        $payload = $jsonText | ConvertFrom-Json -ErrorAction Stop
-    }
-    catch {
-        Write-Log "Could not parse Winget JSON output. Falling back to per-package checks." -Level "WARNING"
-        $script:installedCachePrimed = $false
-        return $false
-    }
+                $script:installedCache = @{}
+                $detectedCount = 0
+                foreach ($pkg in $packageEntries) {
+                    if ($pkg -and ($pkg.PSObject.Properties.Name -contains "PackageIdentifier") -and -not [string]::IsNullOrWhiteSpace($pkg.PackageIdentifier)) {
+                        $script:installedCache[$pkg.PackageIdentifier] = $true
+                        $detectedCount++
+                    }
+                }
 
-    $packageEntries = @()
-    if ($payload -and ($payload.PSObject.Properties.Name -contains "Sources")) {
-        foreach ($source in @($payload.Sources)) {
-            if ($source -and ($source.PSObject.Properties.Name -contains "Packages")) {
-                $packageEntries += @($source.Packages)
+                $script:installedCachePrimed = $true
+                Write-Log "Winget snapshot ready (JSON). Detected $detectedCount installed package identifiers." -Level "SUCCESS"
+                return $true
+            }
+            catch {
+                Write-Log "Could not parse Winget JSON output: $($_.Exception.Message)" -Level "WARNING" -NoConsole
             }
         }
     }
-    elseif ($payload -and ($payload.PSObject.Properties.Name -contains "Packages")) {
-        $packageEntries += @($payload.Packages)
+
+    # --- Strategy 2: Parse text table output (winget < v1.6 or JSON failed) ---
+    Write-Log "JSON snapshot unavailable, parsing text table from 'winget list'..." -Level "INFO"
+    $result = Invoke-WingetCommand -Arguments @("list")
+    if ($result.ExitCode -ne 0) {
+        Write-Log "Could not read Winget package list. Falling back to per-package checks." -Level "WARNING"
+        $script:installedCachePrimed = $false
+        return $false
+    }
+
+    $lines = @($result.StdOut | ForEach-Object { "$_" })
+    # Find the header line that contains "Id" and the dash-separator line
+    $headerIdx = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '\bId\b' -and $lines[$i] -match '\bVersion\b') {
+            $headerIdx = $i
+            break
+        }
+    }
+
+    if ($headerIdx -lt 0) {
+        Write-Log "Could not locate header row in winget list output. Falling back to per-package checks." -Level "WARNING"
+        $script:installedCachePrimed = $false
+        return $false
+    }
+
+    # Determine column positions from the header
+    $header = $lines[$headerIdx]
+    $idStart = $header.IndexOf("Id")
+    # The column after Id is typically "Version"
+    $versionStart = $header.IndexOf("Version")
+    if ($idStart -lt 0 -or $versionStart -lt 0 -or $versionStart -le $idStart) {
+        Write-Log "Could not parse column positions from winget list header. Falling back to per-package checks." -Level "WARNING"
+        $script:installedCachePrimed = $false
+        return $false
+    }
+
+    # Skip header and separator (dashes) lines
+    $dataStart = $headerIdx + 1
+    if ($dataStart -lt $lines.Count -and $lines[$dataStart] -match '^[\s-]+$') {
+        $dataStart++
     }
 
     $script:installedCache = @{}
     $detectedCount = 0
-    foreach ($pkg in $packageEntries) {
-        if ($pkg -and ($pkg.PSObject.Properties.Name -contains "PackageIdentifier") -and -not [string]::IsNullOrWhiteSpace($pkg.PackageIdentifier)) {
-            $script:installedCache[$pkg.PackageIdentifier] = $true
+    for ($i = $dataStart; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+        if ($line.Length -le $idStart) { continue }
+        $idEnd = [Math]::Min($line.Length, $versionStart)
+        $pkgId = $line.Substring($idStart, $idEnd - $idStart).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($pkgId) -and $pkgId -match '\S+\.\S+') {
+            $script:installedCache[$pkgId] = $true
             $detectedCount++
         }
     }
 
     $script:installedCachePrimed = $true
-    Write-Log "Winget snapshot ready. Detected $detectedCount installed package identifiers." -Level "SUCCESS"
+    Write-Log "Winget snapshot ready (text). Detected $detectedCount installed package identifiers." -Level "SUCCESS"
     return $true
 }
 
