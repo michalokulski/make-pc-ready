@@ -29,7 +29,7 @@ Creates a fresh Windows VM in Hyper-V with fully unattended installation. Design
 
 The wizard walks through:
 1. **ISO source** — download from Microsoft (FIDO), build from UUP dump, or pick a local `.iso`
-2. **VM settings** — name, memory, CPU cores, disk size, network switch
+2. **VM settings** — name, memory (GB), CPU cores, disk size (GB), network switch
 3. **Summary + confirmation** — review and approve before creation
 4. **Start + connect** — optionally boot the VM and open the console
 
@@ -54,9 +54,9 @@ The wizard walks through:
 | `-VMName` | string | Auto-generated (`TestVM-yyyyMMdd-HHmmss`) | Name for the new VM |
 | `-ISOPath` | string | *(interactive)* | Path to a Windows installation ISO |
 | `-SwitchName` | string | *(interactive)* | Hyper-V virtual switch name |
-| `-MemoryBytes` | int64 | `4GB` | Startup memory |
+| `-MemoryGB` | int | `4` | Startup memory in GB |
 | `-CPUCount` | int | `2` | Virtual processor count |
-| `-DiskSizeBytes` | int64 | `64GB` | Dynamic VHDX size |
+| `-DiskSizeGB` | int | `64` | Dynamic VHDX size in GB |
 | `-VMPath` | string | Hyper-V default | Base folder for VM storage |
 | `-UnattendISOPath` | string | `.\unattend.iso` | Path to the unattend ISO |
 | `-LogPath` | string | `~\Desktop\MakeTestVM.log` | Log file location |
@@ -78,6 +78,8 @@ Queries the [UUP dump API](https://uupdump.net) for available builds, downloads 
 
 Browse for an existing `.iso` file on disk.
 
+> **Language note:** The bundled `autounattend.xml` is configured for **English (en-US)**. If you select or provide a non-English ISO, the script will warn that the unattended installation may not be fully automatic (e.g. language/locale prompts or edition mismatches may appear). For a guaranteed hands-off install, use an English ISO or regenerate `unattend.iso` to match your ISO language.
+
 ## VM Configuration
 
 The script creates a **Generation 2** (UEFI) Hyper-V VM with:
@@ -90,12 +92,29 @@ The script creates a **Generation 2** (UEFI) Hyper-V VM with:
 | VHDX | Dynamic, attached to SCSI |
 | DVD 1 | Windows installation ISO |
 | DVD 2 | Unattend ISO |
-| Boot order | DVD → Hard drive |
+| Boot order | HDD first, then DVD (empty HDD falls through to DVD on first boot) |
 | Checkpoints | Standard (automatic checkpoints disabled) |
+
+### Boot Keystroke
+
+After starting the VM, the script automatically sends Enter keystrokes via the Hyper-V virtual keyboard (`Msvm_Keyboard`) to handle the "Press any key to boot from CD/DVD" prompt. This is a safety net — on first boot with an empty HDD, UEFI typically falls through to the DVD automatically. If the keystroke fails (non-critical), a warning is logged with manual instructions.
 
 ## Unattend ISO
 
-The `unattend.iso` contains `autounattend.xml` which fully automates Windows Setup. The included configuration:
+The `unattend.iso` contains `autounattend.xml` which fully automates Windows Setup. The included configuration is for **English (en-US)** installations only.
+
+### Language Compatibility
+
+The bundled `autounattend.xml` targets English (en-US):
+- UI language, locale, keyboard, and geo location are all set to `en-US` / `0409`
+- The Windows Enterprise product key is language-neutral, but edition matching depends on the ISO contents
+
+**Using a non-English ISO** may cause:
+- Language/locale prompts during installation requiring manual input
+- Edition selection mismatches
+- OOBE screens not being fully skipped
+
+The script warns at multiple points (ISO selection, summary screen, and in the log) if a non-English language is detected or if the ISO language cannot be determined.
 
 ### What It Automates
 
@@ -144,6 +163,7 @@ Non-interactive and semi-interactive modes validate all parameters before VM cre
 All operations are logged to a timestamped file (default: `~\Desktop\MakeTestVM.log`) with:
 - Timestamps and severity levels (`SUCCESS`, `INFO`, `WARNING`, `ERROR`)
 - Full configuration dump in non-interactive mode
+- Language compatibility warnings when applicable
 - Duration and final result in the log footer
 
 ## Examples
@@ -153,9 +173,9 @@ All operations are logged to a timestamped file (default: `~\Desktop\MakeTestVM.
 .\MakeTestVM.ps1 -NonInteractive `
     -ISOPath "C:\ISOs\Win11_24H2_English_x64.iso" `
     -VMName "Minimal-Test" `
-    -MemoryBytes 2GB `
+    -MemoryGB 2 `
     -CPUCount 1 `
-    -DiskSizeBytes 40GB `
+    -DiskSizeGB 40 `
     -StartVM
 
 # Create a VM on a specific drive and switch
@@ -164,9 +184,17 @@ All operations are logged to a timestamped file (default: `~\Desktop\MakeTestVM.
     -VMName "Dev-VM" `
     -VMPath "D:\VMs" `
     -SwitchName "External" `
-    -MemoryBytes 8GB `
+    -MemoryGB 8 `
     -CPUCount 4 `
     -StartVM -OpenConsole
+
+# Create a VM with 6 GB RAM (direct GB values — no conversion needed)
+.\MakeTestVM.ps1 -NonInteractive `
+    -ISOPath "C:\ISOs\Win11.iso" `
+    -VMName "Custom-Test" `
+    -MemoryGB 6 `
+    -DiskSizeGB 128 `
+    -StartVM
 
 # Connect to a running VM manually
 vmconnect localhost "TestVM-01"

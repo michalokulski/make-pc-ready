@@ -2,9 +2,9 @@ param (
     [string]$VMName,
     [string]$ISOPath,
     [string]$SwitchName,
-    [int64]$MemoryBytes = 4GB,
+    [int]$MemoryGB = 4,
     [int]$CPUCount = 2,
-    [int64]$DiskSizeBytes = 64GB,
+    [int]$DiskSizeGB = 64,
     [string]$VMPath,
     [string]$UnattendISOPath,
     [string]$LogPath = "$env:USERPROFILE\Desktop\MakeTestVM.log",
@@ -24,6 +24,7 @@ param (
 $script:logFile = $LogPath
 $script:logStartTime = Get-Date
 $script:scriptRoot = $PSScriptRoot
+$script:selectedISOLanguage = $null
 
 $script:logColors = @{
     "SUCCESS" = "Green"
@@ -190,16 +191,16 @@ function Test-NonInteractiveConfig {
     }
 
     if ($Config.Memory -lt 1GB) {
-        $validationErrors += "MemoryBytes must be at least 1 GB. Received: $([math]::Round($Config.Memory / 1MB, 0)) MB."
+        $validationErrors += "MemoryGB must be at least 1. Received: $([math]::Round($Config.Memory / 1GB, 2)) GB."
     }
 
     $hostMemory = (Get-CimInstance -ClassName Win32_ComputerSystem).TotalPhysicalMemory
     if ($Config.Memory -gt $hostMemory) {
-        $validationErrors += "MemoryBytes cannot exceed host physical memory ($([math]::Round($hostMemory / 1GB, 2)) GB). Received: $([math]::Round($Config.Memory / 1GB, 2)) GB."
+        $validationErrors += "MemoryGB cannot exceed host physical memory ($([math]::Round($hostMemory / 1GB, 2)) GB). Received: $([math]::Round($Config.Memory / 1GB, 2)) GB."
     }
 
     if ($Config.DiskSize -lt 40GB) {
-        $validationErrors += "DiskSizeBytes must be at least 40 GB. Received: $([math]::Round($Config.DiskSize / 1GB, 2)) GB."
+        $validationErrors += "DiskSizeGB must be at least 40. Received: $([math]::Round($Config.DiskSize / 1GB, 2)) GB."
     }
 
     if ($Config.SwitchName) {
@@ -306,6 +307,18 @@ function Get-WindowsISOViaFido {
     $langChoice = Read-ValidatedInteger -Prompt "Select language (1-$($languages.Count)) [1]" -Min 1 -Max $languages.Count -DefaultValue 1
 
     $fidoLang = $languages[$langChoice - 1].Code
+    $script:selectedISOLanguage = $fidoLang
+
+    # Warn about non-English ISO and unattend compatibility
+    if ($fidoLang -notin @("English", "English International")) {
+        Write-Host ""
+        Write-Host "  WARNING: The included autounattend.xml is configured for English (en-US)." -ForegroundColor Yellow
+        Write-Host "  A non-English ISO may cause the unattended installation to fail or require" -ForegroundColor Yellow
+        Write-Host "  manual intervention (e.g. language/locale prompts, edition mismatches)." -ForegroundColor Yellow
+        Write-Host "  For fully automatic installation, use an English ISO or a matching unattend.iso." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Log "Non-English ISO language selected ('$fidoLang'). Bundled autounattend.xml is for en-US." -Level "WARNING"
+    }
 
     # ---- Architecture Selection ----
     Write-Host ""
@@ -515,7 +528,19 @@ function Get-WindowsISOViaUUPDump {
     $langChoice = Read-ValidatedInteger -Prompt "Select language (1-$($langCodes.Count)) [$defaultLangIdx]" -Min 1 -Max $langCodes.Count -DefaultValue $defaultLangIdx
 
     $selectedLang = $langCodes[$langChoice - 1].Name
+    $script:selectedISOLanguage = $selectedLang
     Write-Log "Selected language: $selectedLang" -Level "INFO"
+
+    # Warn about non-English ISO and unattend compatibility
+    if ($selectedLang -notmatch '^en-') {
+        Write-Host ""
+        Write-Host "  WARNING: The included autounattend.xml is configured for English (en-US)." -ForegroundColor Yellow
+        Write-Host "  A non-English ISO may cause the unattended installation to fail or require" -ForegroundColor Yellow
+        Write-Host "  manual intervention (e.g. language/locale prompts, edition mismatches)." -ForegroundColor Yellow
+        Write-Host "  For fully automatic installation, use an English ISO or a matching unattend.iso." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Log "Non-English ISO language selected ('$selectedLang'). Bundled autounattend.xml is for en-US." -Level "WARNING"
+    }
 
     # ---- Edition Selection (dynamic from API) ----
     Write-Log "Querying available editions..." -Level "INFO"
@@ -687,50 +712,25 @@ function Show-VMConfigMenu {
     $nameInput = Read-Host "VM Name [$defaultName]"
     $vmName = if ([string]::IsNullOrWhiteSpace($nameInput)) { $defaultName } else { $nameInput }
 
-    # Memory
+    # Memory (in GB)
     Write-Host ""
-    Write-Host "Memory options:" -ForegroundColor Gray
-    Write-Host "  [1] 2 GB" -ForegroundColor White
-    Write-Host "  [2] 4 GB (recommended)" -ForegroundColor White
-    Write-Host "  [3] 8 GB" -ForegroundColor White
-    Write-Host "  [4] Custom" -ForegroundColor White
-    $memChoice = Read-ValidatedInteger -Prompt "Select memory [2]" -Min 1 -Max 4 -DefaultValue 2
-
-    $memory = switch ($memChoice) {
-        1 { 2GB }
-        2 { 4GB }
-        3 { 8GB }
-        4 {
-            $customMem = Read-PositiveInteger -Prompt "Enter memory in GB" -DefaultValue 4
-            [int64]$customMem * 1GB
-        }
-        default { 4GB }
-    }
+    $hostMemoryGB = [math]::Floor((Get-CimInstance -ClassName Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
+    $memGB = Read-PositiveInteger -Prompt "Memory in GB (host has $hostMemoryGB GB) [4]" -DefaultValue 4
+    $memory = [int64]$memGB * 1GB
 
     # CPUs
     $maxCPU = (Get-CimInstance -ClassName Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
     $defaultCPU = [Math]::Min(2, $maxCPU)
     $cpus = Read-ValidatedInteger -Prompt "CPU cores (1-$maxCPU) [$defaultCPU]" -Min 1 -Max $maxCPU -DefaultValue $defaultCPU
 
-    # Disk Size
+    # Disk Size (in GB)
     Write-Host ""
-    Write-Host "Disk size options:" -ForegroundColor Gray
-    Write-Host "  [1] 40 GB (minimum)" -ForegroundColor White
-    Write-Host "  [2] 64 GB (recommended)" -ForegroundColor White
-    Write-Host "  [3] 128 GB" -ForegroundColor White
-    Write-Host "  [4] Custom" -ForegroundColor White
-    $diskChoice = Read-ValidatedInteger -Prompt "Select disk size [2]" -Min 1 -Max 4 -DefaultValue 2
-
-    $diskSize = switch ($diskChoice) {
-        1 { 40GB }
-        2 { 64GB }
-        3 { 128GB }
-        4 {
-            $customDisk = Read-PositiveInteger -Prompt "Enter disk size in GB" -DefaultValue 64
-            [int64]$customDisk * 1GB
-        }
-        default { 64GB }
+    $diskGB = Read-PositiveInteger -Prompt "Disk size in GB (min 40) [64]" -DefaultValue 64
+    if ($diskGB -lt 40) {
+        Write-Host "Minimum disk size is 40 GB. Using 40 GB." -ForegroundColor Yellow
+        $diskGB = 40
     }
+    $diskSize = [int64]$diskGB * 1GB
 
     # Network Switch
     Write-Host ""
@@ -872,10 +872,13 @@ function New-TestVM {
         Add-VMDvdDrive -VMName $VMName -Path $UnattendISOPath
         Write-Log "Unattend ISO attached: $UnattendISOPath" -Level "SUCCESS"
 
-        # Set boot order: DVD first, then hard drive
+        # Set boot order: HDD first, then DVD drives
+        # On first boot the empty HDD is skipped and UEFI falls through to DVD.
+        # After Windows installs, HDD boots directly.
+        # A boot keystroke is sent as a safety net (see Send-VMBootKeystroke).
         $dvdDrives = Get-VMDvdDrive -VMName $VMName
         $hdd = Get-VMHardDiskDrive -VMName $VMName
-        $bootDevices = @($dvdDrives[0]) + @($hdd) + @($dvdDrives | Select-Object -Skip 1)
+        $bootDevices = @($hdd) + @($dvdDrives)
         Set-VMFirmware -VMName $VMName -BootOrder $bootDevices
 
         # Enable TPM for Windows 11 (if available on host)
@@ -916,6 +919,48 @@ function New-TestVM {
 }
 
 # ============================================================================
+# Boot Keystroke Helper
+# ============================================================================
+
+function Send-VMBootKeystroke {
+    param (
+        [Parameter(Mandatory)]
+        [string]$VMName
+    )
+
+    Write-Log "Sending keystroke to VM to boot from CD/DVD ('Press any key' prompt)..." -Level "INFO"
+
+    try {
+        # Brief pause for VM to reach the UEFI/BIOS boot prompt
+        Start-Sleep -Seconds 1
+
+        $vm = Get-CimInstance -Namespace 'root\virtualization\v2' -ClassName 'Msvm_ComputerSystem' -Filter "ElementName='$VMName'"
+        if (-not $vm) {
+            Write-Log "Could not find VM '$VMName' via CIM to send keystroke." -Level "WARNING"
+            return
+        }
+
+        $keyboard = Get-CimAssociatedInstance -InputObject $vm -ResultClassName 'Msvm_Keyboard'
+        if (-not $keyboard) {
+            Write-Log "Could not access virtual keyboard for VM '$VMName'." -Level "WARNING"
+            return
+        }
+
+        # Send Enter key (VK_RETURN = 0x0D) a few times to ensure it's caught
+        for ($i = 0; $i -lt 3; $i++) {
+            Invoke-CimMethod -InputObject $keyboard -MethodName 'TypeKey' -Arguments @{ keyCode = 0x0D } | Out-Null
+            Start-Sleep -Milliseconds 500
+        }
+
+        Write-Log "Boot keystroke sent to VM." -Level "SUCCESS"
+    }
+    catch {
+        Write-Log "Could not send boot keystroke (non-critical): $($_.Exception.Message)" -Level "WARNING"
+        Write-Log "If the VM shows 'Press any key to boot from CD/DVD', connect and press a key manually." -Level "INFO"
+    }
+}
+
+# ============================================================================
 # Summary & Confirmation
 # ============================================================================
 
@@ -947,6 +992,22 @@ function Show-Summary {
     Write-Host "    - All OOBE screens skipped" -ForegroundColor Gray
     Write-Host "    - Win11 hardware requirements bypassed" -ForegroundColor Gray
     Write-Host ""
+
+    # Language compatibility warning
+    $isEnglishISO = $script:selectedISOLanguage -and (
+        $script:selectedISOLanguage -in @("English", "English International") -or
+        $script:selectedISOLanguage -match '^en-'
+    )
+    if ($script:selectedISOLanguage -and -not $isEnglishISO) {
+        Write-Host "  WARNING: ISO language '$($script:selectedISOLanguage)' differs from the" -ForegroundColor Yellow
+        Write-Host "  bundled autounattend.xml (en-US). Installation may not be fully automatic." -ForegroundColor Yellow
+        Write-Host ""
+    }
+    elseif (-not $script:selectedISOLanguage) {
+        Write-Host "  NOTE: ISO language unknown. The bundled autounattend.xml is for English (en-US)." -ForegroundColor Yellow
+        Write-Host "  If the ISO uses a different language, installation may require manual steps." -ForegroundColor Yellow
+        Write-Host ""
+    }
 
     $confirm = Read-Host "Proceed with VM creation? (Y/n)"
     return ($confirm -eq "" -or $confirm -imatch "^y")
@@ -1040,6 +1101,17 @@ function Main {
 
     Write-Log "Windows ISO: $isoPath" -Level "SUCCESS"
 
+    # Warn if ISO language is unknown (local file or parameter-provided)
+    if (-not $script:selectedISOLanguage) {
+        Write-Log "ISO language could not be determined. The bundled autounattend.xml is for English (en-US)." -Level "WARNING"
+        if (-not $isNonInteractive) {
+            Write-Host ""
+            Write-Host "  NOTE: Ensure the Windows ISO is English (en-US). The bundled autounattend.xml" -ForegroundColor Yellow
+            Write-Host "  is configured for English. A non-English ISO may require manual intervention." -ForegroundColor Yellow
+            Write-Host ""
+        }
+    }
+
     # ---- Step 2: Resolve Unattend ISO ----
     $unattendISOPath = $UnattendISOPath
     if (-not $unattendISOPath) {
@@ -1068,9 +1140,9 @@ function Main {
 
         $vmConfig = @{
             VMName     = $resolvedVMName
-            Memory     = $MemoryBytes
+            Memory     = [int64]$MemoryGB * 1GB
             CPUs       = $CPUCount
-            DiskSize   = $DiskSizeBytes
+            DiskSize   = [int64]$DiskSizeGB * 1GB
             SwitchName = $SwitchName
         }
     }
@@ -1078,9 +1150,9 @@ function Main {
         # Enough CLI params provided - skip interactive menu but still validate
         $vmConfig = @{
             VMName     = $VMName
-            Memory     = $MemoryBytes
+            Memory     = [int64]$MemoryGB * 1GB
             CPUs       = $CPUCount
-            DiskSize   = $DiskSizeBytes
+            DiskSize   = [int64]$DiskSizeGB * 1GB
             SwitchName = $SwitchName
         }
 
@@ -1136,6 +1208,7 @@ function Main {
             if ($StartVM) {
                 Write-Log "Starting VM '$($vmConfig.VMName)'..." -Level "INFO"
                 Start-VM -Name $vmConfig.VMName
+                Send-VMBootKeystroke -VMName $vmConfig.VMName
                 Write-Log "VM started! Windows installation is running unattended." -Level "SUCCESS"
                 Write-Log "You can connect via: vmconnect localhost $($vmConfig.VMName)" -Level "INFO"
 
@@ -1154,6 +1227,7 @@ function Main {
             if ($startNow -eq "" -or $startNow -imatch "^y") {
                 Write-Log "Starting VM '$($vmConfig.VMName)'..." -Level "INFO"
                 Start-VM -Name $vmConfig.VMName
+                Send-VMBootKeystroke -VMName $vmConfig.VMName
                 Write-Log "VM started! Windows installation is running unattended." -Level "SUCCESS"
                 Write-Log "You can connect via: vmconnect localhost $($vmConfig.VMName)" -Level "INFO"
 
