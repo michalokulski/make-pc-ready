@@ -226,12 +226,72 @@ function Test-AdminPrivileges {
     Write-Log "Administrator privileges verified" -Level "SUCCESS"
 }
 
+function Resolve-WingetPath {
+    # Strategy 1: Try invoking winget directly.
+    # App Execution Aliases (reparse points in WindowsApps) are often not found
+    # by Get-Command in elevated PowerShell, but the shell can still invoke them.
+    try {
+        $output = (& winget.exe --version 2>$null) | Out-String
+        if ($output -match 'v\d') { return "winget.exe" }
+    }
+    catch { }
+
+    # Strategy 2: Get-Command lookup (works when winget is a real exe in PATH)
+    $cmd = Get-Command winget.exe -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+
+    # Strategy 3: Resolve from the DesktopAppInstaller AppX package
+    $pkg = Get-AppxPackage -Name "Microsoft.DesktopAppInstaller" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $pkg) {
+        $pkg = Get-AppxPackage -AllUsers -Name "Microsoft.DesktopAppInstaller" -ErrorAction SilentlyContinue | Select-Object -First 1
+    }
+    if ($pkg) {
+        $wingetExe = Join-Path -Path $pkg.InstallLocation -ChildPath "winget.exe"
+        if (Test-Path -Path $wingetExe) {
+            Write-Log "Resolved winget from AppX package: $wingetExe" -Level "INFO"
+            return $wingetExe
+        }
+    }
+
+    # Strategy 4: Search known WindowsApps locations
+    $candidates = @(
+        "$env:LOCALAPPDATA\Microsoft\WindowsApps\winget.exe"
+        "$env:ProgramFiles\WindowsApps\Microsoft.DesktopAppInstaller_*_*__8wekyb3d8bbwe\winget.exe"
+    )
+    foreach ($pattern in $candidates) {
+        $found = Get-Item -Path $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) {
+            Write-Log "Resolved winget from fallback path: $($found.FullName)" -Level "INFO"
+            return $found.FullName
+        }
+    }
+
+    return $null
+}
+
+$script:wingetPath = $null
+
 function Invoke-WingetCommand {
     param (
         [string[]]$Arguments
     )
 
-    $commandOutput = & winget @Arguments 2>&1
+    # Append --accept-source-agreements for subcommands (install, upgrade, list, etc.)
+    # to prevent exit code -1978335138 (0x8A150102) on fresh Windows installations.
+    # Skip for meta-flags like --version or --info that don't interact with sources.
+    if ($Arguments -notcontains "--accept-source-agreements" -and
+        $Arguments[0] -notmatch '^--') {
+        $Arguments += "--accept-source-agreements"
+    }
+
+    if (-not $script:wingetPath) {
+        $script:wingetPath = Resolve-WingetPath
+    }
+    if (-not $script:wingetPath) {
+        return @{ StdOut = @("winget.exe not found"); ExitCode = -1 }
+    }
+
+    $commandOutput = & $script:wingetPath @Arguments 2>&1
     $exitCode = $LASTEXITCODE
     return @{
         StdOut   = $commandOutput
@@ -242,8 +302,8 @@ function Invoke-WingetCommand {
 function Ensure-Winget {
     Write-Log "Checking for Winget installation..." -Level "INFO"
 
-    $winget = Get-Command winget -ErrorAction SilentlyContinue
-    if ($winget) {
+    $script:wingetPath = Resolve-WingetPath
+    if ($script:wingetPath) {
         $versionInfo = Invoke-WingetCommand -Arguments @("--version")
         if ($versionInfo.ExitCode -eq 0) {
             $currentVersion = "$($versionInfo.StdOut | Select-Object -First 1)".Trim()
@@ -291,8 +351,8 @@ function Ensure-Winget {
         return $false
     }
 
-    $winget = Get-Command winget -ErrorAction SilentlyContinue
-    if (-not $winget) {
+    $script:wingetPath = Resolve-WingetPath
+    if (-not $script:wingetPath) {
         Write-Log "Winget still not available after installation attempt." -Level "ERROR"
         return $false
     }
