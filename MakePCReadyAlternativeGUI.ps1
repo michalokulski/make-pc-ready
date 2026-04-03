@@ -188,7 +188,7 @@ PowerShell Version: $($PSVersionTable.PSVersion.ToString())
 "@
 
     $logDir = Split-Path -Path $script:logFile -Parent
-    if (-not (Test-Path -Path $logDir)) {
+    if (-not [string]::IsNullOrWhiteSpace($logDir) -and -not (Test-Path -Path $logDir)) {
         New-Item -ItemType Directory -Path $logDir -Force | Out-Null
     }
 
