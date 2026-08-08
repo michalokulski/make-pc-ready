@@ -1,11 +1,11 @@
 # MakePCReady - Automated PC Setup Script
 
-Tired of configuring your PC after a rebuild? This PowerShell script automates the installation of 112+ applications using Winget with comprehensive logging.
+Tired of configuring your PC after a rebuild? This PowerShell script automates the installation of 120+ applications using Winget with comprehensive logging.
 
 ## Features
 
 ✅ **Collapsible Tree TUI** - Full keyboard-driven selector with collapsible groups/subgroups  
-✅ **112+ Package Catalog** - Applications, gaming, AI/LLM, runtimes, .NET, Java, and more  
+✅ **120+ Package Catalog** - Applications, gaming, AI/LLM, runtimes, .NET, Java, and more  
 ✅ **Smart Installed Detection** - Dual-strategy detection: JSON snapshot (`winget list --output json`) on v1.6+, with automatic text table parsing fallback for older Winget versions  
 ✅ **Filter & Hide Installed** - Real-time text filter and toggle to hide already-installed packages  
 ✅ **WPF GUI Alternative** - A separate WPF-based graphical interface for the same catalog  
@@ -163,7 +163,7 @@ winget search "application name"
 
 ## Default Application Catalog
 
-The catalog includes 112+ entries organized into groups and subgroups:
+The catalog includes 120+ entries organized into groups and subgroups:
 
 ### Applications
 

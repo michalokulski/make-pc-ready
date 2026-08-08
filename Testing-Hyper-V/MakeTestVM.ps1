@@ -7,7 +7,7 @@ param (
     [int]$DiskSizeGB = 64,
     [string]$VMPath,
     [string]$UnattendISOPath,
-    [string]$LogPath = "$env:USERPROFILE\Desktop\MakeTestVM.log",
+    [string]$LogPath = $(if (Test-Path "$env:USERPROFILE\Desktop") { "$env:USERPROFILE\Desktop\MakeTestVM.log" } else { "$env:TEMP\MakeTestVM.log" }),
     [switch]$NonInteractive,
     [switch]$StartVM,
     [switch]$OpenConsole
@@ -26,109 +26,8 @@ $script:logStartTime = Get-Date
 $script:scriptRoot = $PSScriptRoot
 $script:selectedISOLanguage = $null
 
-$script:logColors = @{
-    "SUCCESS" = "Green"
-    "INFO"    = "White"
-    "WARNING" = "Yellow"
-    "ERROR"   = "Red"
-}
-
-# ============================================================================
-# Logging
-# ============================================================================
-
-function Initialize-Log {
-    $header = @"
-================================================================================
-Hyper-V Test VM Creator Log
-Started: $($script:logStartTime.ToString('yyyy-MM-dd HH:mm:ss'))
-User: $env:USERNAME
-Computer: $env:COMPUTERNAME
-PowerShell Version: $($PSVersionTable.PSVersion.ToString())
-================================================================================
-
-"@
-
-    $logDir = Split-Path -Path $script:logFile -Parent
-    if (-not [string]::IsNullOrWhiteSpace($logDir) -and -not (Test-Path -Path $logDir)) {
-        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-    }
-
-    $header | Out-File -FilePath $script:logFile -Encoding UTF8
-    Write-Host "Log file created at: $script:logFile" -ForegroundColor Green
-}
-
-function Write-Log {
-    param (
-        [string]$Message,
-        [string]$Level = "INFO",
-        [switch]$NoConsole
-    )
-
-    $timestamp = Get-Date -Format "HH:mm:ss"
-    $logMessage = "$timestamp [$Level] $Message"
-
-    $logMessage | Out-File -FilePath $script:logFile -Encoding UTF8 -Append
-
-    if (-not $NoConsole) {
-        $color = if ($script:logColors.ContainsKey($Level)) { $script:logColors[$Level] } else { "White" }
-        Write-Host $logMessage -ForegroundColor $color
-    }
-}
-
-function Read-ValidatedInteger {
-    param (
-        [Parameter(Mandatory)]
-        [string]$Prompt,
-        [Parameter(Mandatory)]
-        [int]$Min,
-        [Parameter(Mandatory)]
-        [int]$Max,
-        [Parameter(Mandatory)]
-        [int]$DefaultValue
-    )
-
-    do {
-        $inputValue = Read-Host $Prompt
-        if ([string]::IsNullOrWhiteSpace($inputValue)) {
-            $inputValue = "$DefaultValue"
-        }
-
-        $parsedValue = 0
-        $isValid = [int]::TryParse($inputValue, [ref]$parsedValue) -and $parsedValue -ge $Min -and $parsedValue -le $Max
-
-        if (-not $isValid) {
-            Write-Host "Please enter a number between $Min and $Max." -ForegroundColor Yellow
-        }
-    } while (-not $isValid)
-
-    return $parsedValue
-}
-
-function Read-PositiveInteger {
-    param (
-        [Parameter(Mandatory)]
-        [string]$Prompt,
-        [Parameter(Mandatory)]
-        [int]$DefaultValue
-    )
-
-    do {
-        $inputValue = Read-Host $Prompt
-        if ([string]::IsNullOrWhiteSpace($inputValue)) {
-            $inputValue = "$DefaultValue"
-        }
-
-        $parsedValue = 0
-        $isValid = [int]::TryParse($inputValue, [ref]$parsedValue) -and $parsedValue -gt 0
-
-        if (-not $isValid) {
-            Write-Host "Please enter a positive whole number." -ForegroundColor Yellow
-        }
-    } while (-not $isValid)
-
-    return $parsedValue
-}
+# Import shared VM module
+Import-Module -Force (Join-Path -Path $PSScriptRoot -ChildPath "..\lib\VMCommon.psm1")
 
 # ============================================================================
 # Prerequisites
@@ -649,29 +548,6 @@ function Get-WindowsISOViaUUPDump {
     return $destISO
 }
 
-function Show-ISOSourceMenu {
-    Write-Host ""
-    Write-Host "============================================" -ForegroundColor Cyan
-    Write-Host "  Windows ISO Source Selection" -ForegroundColor Cyan
-    Write-Host "============================================" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "  [1] Download from Microsoft via FIDO.ps1" -ForegroundColor White
-    Write-Host "      (Latest Windows 10/11 retail ISO, ~5-6 GB download)" -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "  [2] Build ISO via UUP dump" -ForegroundColor White
-    Write-Host "      (Any Win10/11 build incl. older versions, slower)" -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "  [3] Use a local ISO file" -ForegroundColor White
-    Write-Host "      (Browse for an existing .iso file)" -ForegroundColor Gray
-    Write-Host ""
-
-    do {
-        $choice = Read-Host "Select ISO source (1-3)"
-    } while ($choice -notin @("1", "2", "3"))
-
-    return [int]$choice
-}
-
 function Select-LocalISO {
     Add-Type -AssemblyName System.Windows.Forms
     $dialog = New-Object System.Windows.Forms.OpenFileDialog
@@ -1014,35 +890,40 @@ function Show-Summary {
 }
 
 # ============================================================================
-# Finalize Log
+# Unattend ISO Auto-Generation
 # ============================================================================
 
-function Complete-Log {
-    param ([bool]$Success)
+function New-UnattendISO {
+    param (
+        [Parameter(Mandatory)]
+        [string]$XmlSourcePath,
+        [Parameter(Mandatory)]
+        [string]$OutputISOPath
+    )
 
-    $elapsed = (Get-Date) - $script:logStartTime
-
-    $footer = @"
-
-================================================================================
-Completed: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
-Duration: $($elapsed.ToString('hh\:mm\:ss'))
-Result: $(if ($Success) { 'SUCCESS' } else { 'FAILED' })
-================================================================================
-"@
-
-    $footer | Out-File -FilePath $script:logFile -Encoding UTF8 -Append
-
-    if ($Success) {
-        Write-Host ""
-        Write-Host "VM creation completed successfully!" -ForegroundColor Green
-        Write-Host "Log: $script:logFile" -ForegroundColor Gray
+    $stagingDir = Join-Path -Path $env:TEMP -ChildPath "unattend_iso_staging"
+    if (Test-Path -Path $stagingDir) {
+        Remove-Item -Path $stagingDir -Recurse -Force
     }
-    else {
-        Write-Host ""
-        Write-Host "VM creation failed. Check the log for details." -ForegroundColor Red
-        Write-Host "Log: $script:logFile" -ForegroundColor Gray
+    New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
+
+    Copy-Item -Path $XmlSourcePath -Destination (Join-Path -Path $stagingDir -ChildPath "autounattend.xml") -Force
+
+    $oscdimg = Get-Command -Name "oscdimg.exe" -ErrorAction SilentlyContinue
+    if (-not $oscdimg) {
+        throw "oscdimg.exe not found. Install Windows ADK or copy oscdimg.exe to PATH."
     }
+
+    Write-Log "Creating unattend.iso using oscdimg..." -Level "INFO"
+    & oscdimg.exe -o -lCIDATA $stagingDir $OutputISOPath
+
+    Remove-Item -Path $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
+
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -Path $OutputISOPath)) {
+        throw "oscdimg failed to create unattend.iso (exit code: $LASTEXITCODE)."
+    }
+
+    Write-Log "unattend.iso created successfully: $OutputISOPath" -Level "SUCCESS"
 }
 
 # ============================================================================
@@ -1050,7 +931,7 @@ Result: $(if ($Success) { 'SUCCESS' } else { 'FAILED' })
 # ============================================================================
 
 function Main {
-    Initialize-Log
+    Initialize-Log -Title "Hyper-V Test VM Creator Log"
     Test-AdminPrivileges
 
     if (-not (Test-HyperVAvailable)) {
@@ -1119,12 +1000,23 @@ function Main {
     }
 
     if (-not (Test-Path -Path $unattendISOPath)) {
-        Write-Log "Unattend ISO not found at: $unattendISOPath" -Level "ERROR"
-        Write-Log "Expected file: unattend.iso in the same folder as this script." -Level "ERROR"
-        Write-Log "Generate your autounattend.xml at https://schneegans.de/windows/unattend-generator/" -Level "INFO"
-        Write-Log "Then download it as '.xml wrapped in .iso' and place it as unattend.iso in the repo root." -Level "INFO"
-        Complete-Log -Success $false
-        exit 1
+        Write-Log "Unattend ISO not found at: $unattendISOPath" -Level "WARNING"
+        Write-Log "Attempting to create unattend.iso from autounattend.xml..." -Level "INFO"
+        $xmlSource = Join-Path -Path $script:scriptRoot -ChildPath "autounattend.xml"
+        if (-not (Test-Path -Path $xmlSource)) {
+            Write-Log "autounattend.xml not found in script folder. Cannot create unattend.iso." -Level "ERROR"
+            Write-Log "Generate your autounattend.xml at https://schneegans.de/windows/unattend-generator/" -Level "INFO"
+            Complete-Log -Success $false
+            exit 1
+        }
+        try {
+            New-UnattendISO -XmlSourcePath $xmlSource -OutputISOPath $unattendISOPath
+        }
+        catch {
+            Write-Log "Failed to create unattend.iso: $($_.Exception.Message)" -Level "ERROR"
+            Complete-Log -Success $false
+            exit 1
+        }
     }
 
     Write-Log "Unattend ISO: $unattendISOPath" -Level "SUCCESS"

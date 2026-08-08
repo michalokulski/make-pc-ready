@@ -35,7 +35,8 @@ $script:isLinuxPlatform = -not $script:isWindowsPlatform
 
 if ([string]::IsNullOrWhiteSpace($LogPath)) {
     if ($script:isWindowsPlatform) {
-        $LogPath = Join-Path -Path $env:USERPROFILE -ChildPath "Desktop\MakeTestVM-QEMU.log"
+        $desktopPath = Join-Path -Path $env:USERPROFILE -ChildPath "Desktop"
+        $LogPath = if (Test-Path $desktopPath) { Join-Path -Path $desktopPath -ChildPath "MakeTestVM-QEMU.log" } else { Join-Path -Path $env:TEMP -ChildPath "MakeTestVM-QEMU.log" }
     }
     else {
         $baseLogDir = if ($env:HOME) { $env:HOME } else { (Get-Location).Path }
@@ -45,110 +46,8 @@ if ([string]::IsNullOrWhiteSpace($LogPath)) {
 
 $script:logFile = $LogPath
 
-$script:logColors = @{
-    "SUCCESS" = "Green"
-    "INFO"    = "White"
-    "WARNING" = "Yellow"
-    "ERROR"   = "Red"
-}
-
-function Initialize-Log {
-    $userName = if ($env:USERNAME) { $env:USERNAME } else { $env:USER }
-
-    $header = @"
-================================================================================
-QEMU Test VM Creator Log
-Started: $($script:logStartTime.ToString('yyyy-MM-dd HH:mm:ss'))
-User: $userName
-Computer: $([System.Net.Dns]::GetHostName())
-PowerShell Version: $($PSVersionTable.PSVersion.ToString())
-OS: $([System.Runtime.InteropServices.RuntimeInformation]::OSDescription)
-================================================================================
-
-"@
-
-    $logDir = Split-Path -Path $script:logFile -Parent
-    if (-not [string]::IsNullOrWhiteSpace($logDir) -and -not (Test-Path -Path $logDir)) {
-        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-    }
-
-    $header | Out-File -FilePath $script:logFile -Encoding UTF8
-    Write-Host "Log file created at: $script:logFile" -ForegroundColor Green
-}
-
-function Write-Log {
-    param (
-        [Parameter(Mandatory)]
-        [string]$Message,
-        [ValidateSet("SUCCESS", "INFO", "WARNING", "ERROR")]
-        [string]$Level = "INFO",
-        [switch]$NoConsole
-    )
-
-    $timestamp = Get-Date -Format "HH:mm:ss"
-    $line = "$timestamp [$Level] $Message"
-
-    $line | Out-File -FilePath $script:logFile -Encoding UTF8 -Append
-
-    if (-not $NoConsole) {
-        $color = if ($script:logColors.ContainsKey($Level)) { $script:logColors[$Level] } else { "White" }
-        Write-Host $line -ForegroundColor $color
-    }
-}
-
-function Read-ValidatedInteger {
-    param (
-        [Parameter(Mandatory)]
-        [string]$Prompt,
-        [Parameter(Mandatory)]
-        [int]$Min,
-        [Parameter(Mandatory)]
-        [int]$Max,
-        [Parameter(Mandatory)]
-        [int]$DefaultValue
-    )
-
-    do {
-        $inputValue = Read-Host $Prompt
-        if ([string]::IsNullOrWhiteSpace($inputValue)) {
-            $inputValue = "$DefaultValue"
-        }
-
-        $parsedValue = 0
-        $isValid = [int]::TryParse($inputValue, [ref]$parsedValue) -and $parsedValue -ge $Min -and $parsedValue -le $Max
-
-        if (-not $isValid) {
-            Write-Host "Please enter a number between $Min and $Max." -ForegroundColor Yellow
-        }
-    } while (-not $isValid)
-
-    return $parsedValue
-}
-
-function Read-PositiveInteger {
-    param (
-        [Parameter(Mandatory)]
-        [string]$Prompt,
-        [Parameter(Mandatory)]
-        [int]$DefaultValue
-    )
-
-    do {
-        $inputValue = Read-Host $Prompt
-        if ([string]::IsNullOrWhiteSpace($inputValue)) {
-            $inputValue = "$DefaultValue"
-        }
-
-        $parsedValue = 0
-        $isValid = [int]::TryParse($inputValue, [ref]$parsedValue) -and $parsedValue -gt 0
-
-        if (-not $isValid) {
-            Write-Host "Please enter a positive whole number." -ForegroundColor Yellow
-        }
-    } while (-not $isValid)
-
-    return $parsedValue
-}
+# Import shared VM module
+Import-Module -Force (Join-Path -Path $PSScriptRoot -ChildPath "..\lib\VMCommon.psm1")
 
 function Resolve-CommandPath {
     param (
@@ -403,32 +302,6 @@ function Get-DefaultDownloadFolder {
     }
 
     return (Resolve-Path -Path $folder).Path
-}
-
-function Show-ISOSourceMenu {
-    Write-Host ""
-    Write-Host "============================================" -ForegroundColor Cyan
-    Write-Host "  Windows ISO Source Selection" -ForegroundColor Cyan
-    Write-Host "============================================" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "  [1] Download from Microsoft via FIDO.ps1" -ForegroundColor White
-    Write-Host "      (Latest Windows 10/11 retail ISO)" -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "  [2] Build ISO via UUP dump" -ForegroundColor White
-    Write-Host "      (More build options, slower conversion process)" -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "  [3] Use a local ISO file" -ForegroundColor White
-    Write-Host ""
-
-    do {
-        $choice = Read-Host "Select ISO source (1-3)"
-    } while ($choice -notin @("1", "2", "3"))
-
-    switch ($choice) {
-        "1" { return "fido" }
-        "2" { return "uupdump" }
-        default { return "local" }
-    }
 }
 
 function Invoke-FileDownload {
@@ -838,14 +711,19 @@ function Resolve-WindowsISOPath {
     $resolvedSource = if ($ConfiguredSource -eq "auto") { Show-ISOSourceMenu } else { $ConfiguredSource }
     $resolvedDownloadFolder = Get-DefaultDownloadFolder -ConfiguredFolder $ConfiguredDownloadFolder
 
-    switch ($resolvedSource) {
-        "fido" {
+    # Normalize source to int (shared Show-ISOSourceMenu returns int; -ISOSource param may be string)
+    $sourceMap = @{ "fido" = 1; "uupdump" = 2; "local" = 3 }
+    $sourceInt = if ($resolvedSource -is [int]) { $resolvedSource } else { $sourceMap[$resolvedSource] }
+    if (-not $sourceInt) { throw "Unsupported ISOSource '$resolvedSource'." }
+
+    switch ($sourceInt) {
+        1 {
             return Get-WindowsISOViaFido -TargetDownloadFolder $resolvedDownloadFolder
         }
-        "uupdump" {
+        2 {
             return Get-WindowsISOViaUUPDump -TargetDownloadFolder $resolvedDownloadFolder
         }
-        "local" {
+        3 {
             return Resolve-PathFromPrompt -Prompt "Path to Windows ISO" -RequiredSuffix ".iso"
         }
         default {
@@ -1132,36 +1010,8 @@ function New-UnattendISO {
     Write-Log "unattend.iso created successfully: $OutputISOPath" -Level "SUCCESS"
 }
 
-function Complete-Log {
-    param ([bool]$Success)
-
-    $elapsed = (Get-Date) - $script:logStartTime
-
-    $footer = @"
-
-================================================================================
-Completed: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
-Duration: $($elapsed.ToString('hh\:mm\:ss'))
-Result: $(if ($Success) { 'SUCCESS' } else { 'FAILED' })
-================================================================================
-"@
-
-    $footer | Out-File -FilePath $script:logFile -Encoding UTF8 -Append
-
-    if ($Success) {
-        Write-Host ""
-        Write-Host "QEMU VM operation completed successfully!" -ForegroundColor Green
-        Write-Host "Log: $script:logFile" -ForegroundColor Gray
-    }
-    else {
-        Write-Host ""
-        Write-Host "QEMU VM operation failed. Check the log for details." -ForegroundColor Red
-        Write-Host "Log: $script:logFile" -ForegroundColor Gray
-    }
-}
-
 function Main {
-    Initialize-Log
+    Initialize-Log -Title "QEMU Test VM Creator Log"
 
     if (-not (Test-Prerequisites)) {
         Complete-Log -Success $false

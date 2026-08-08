@@ -1,0 +1,18 @@
+# Log files
+*.log
+
+# VM storage (generated)
+Testing-QEMU/VMs/
+Testing-Hyper-V/VMs/
+
+# Downloaded ISOs (large binaries)
+*.iso
+
+# PowerShell transcript files
+*.transcript
+
+# Windows thumbnail cache
+Thumbs.db
+
+# VS Code workspace settings (personal)
+.vscode/settings.json
