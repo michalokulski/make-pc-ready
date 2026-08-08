@@ -1,6 +1,6 @@
-param (
-    [string]$LogPath = $(if (Test-Path "$env:USERPROFILE\Desktop") { "$env:USERPROFILE\Desktop\MakePCReady.log" } else { "$env:TEMP\MakePCReady.log" }),
-    [switch]$SkipInteractiveSelection
+﻿param(
+  [string]$LogPath = $(if (Test-Path "$env:USERPROFILE\Desktop") { "$env:USERPROFILE\Desktop\MakePCReady.log" } else { "$env:TEMP\MakePCReady.log" }),
+  [switch]$SkipInteractiveSelection
 )
 
 # ============================================================================
@@ -21,28 +21,28 @@ Import-Module -Force (Join-Path -Path $PSScriptRoot -ChildPath "lib\PCSetup.Comm
 # ============================================================================
 
 function Show-InteractiveAppSelector {
-    param (
-        [Parameter(Mandatory = $true)]
-        [object[]]$Catalog
-    )
+  param(
+    [Parameter(Mandatory = $true)]
+    [object[]]$Catalog
+  )
 
-    Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
+  Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
 
-    $selection = @($Catalog | ForEach-Object {
-        [PSCustomObject]@{
-            Group       = $_.Group
-            SubGroup    = $_.SubGroup
-            Action      = $_.Action
-            Id          = $_.Id
-            Name        = $_.Name
-            Selected    = [bool]$_.DefaultSelected
-            IsInstalled = [bool]$_.IsInstalled
-        }
+  $selection = @($Catalog | ForEach-Object {
+      [pscustomobject]@{
+        Group = $_.Group
+        SubGroup = $_.SubGroup
+        Action = $_.Action
+        Id = $_.Id
+        Name = $_.Name
+        Selected = [bool]$_.DefaultSelected
+        IsInstalled = [bool]$_.IsInstalled
+      }
     })
 
-    $sync = [hashtable]::Synchronized(@{ Result = $null })
+  $sync = [hashtable]::Synchronized(@{ Result = $null })
 
-    $xaml = @'
+  $xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         Title="MakePCReady - Setup Studio" Height="700" Width="900"
         WindowStartupLocation="CenterScreen" ResizeMode="CanResizeWithGrip">
@@ -93,135 +93,135 @@ function Show-InteractiveAppSelector {
 </Window>
 '@
 
-    $window = [Windows.Markup.XamlReader]::Parse($xaml)
-    $tree = $window.FindName("AppTree")
-    $searchBox = $window.FindName("SearchBox")
-    $hideCheck = $window.FindName("HideInstalledCheck")
-    $countText = $window.FindName("CountText")
+  $window = [Windows.Markup.XamlReader]::Parse($xaml)
+  $tree = $window.FindName("AppTree")
+  $searchBox = $window.FindName("SearchBox")
+  $hideCheck = $window.FindName("HideInstalledCheck")
+  $countText = $window.FindName("CountText")
 
-    # Build tree
-    $groups = [ordered]@{}
-    foreach ($item in $selection) {
-        if (-not $groups.Contains($item.Group)) {
-            $groups[$item.Group] = [ordered]@{}
+  # Build tree
+  $groups = [ordered]@{}
+  foreach ($item in $selection) {
+    if (-not $groups.Contains($item.Group)) {
+      $groups[$item.Group] = [ordered]@{}
+    }
+    if (-not $groups[$item.Group].Contains($item.SubGroup)) {
+      $groups[$item.Group][$item.SubGroup] = @()
+    }
+    $groups[$item.Group][$item.SubGroup] += $item
+  }
+
+  function Update-Count {
+    $sel = @($selection | Where-Object { $_.Selected }).Count
+    $countText.Text = "$sel / $($selection.Count) items selected"
+  }
+
+  function Refresh-Tree {
+    param([string]$Filter = "")
+
+    $tree.Items.Clear()
+    $filterLower = $Filter.ToLowerInvariant()
+    $hideInstalled = $hideCheck.IsChecked -eq $true
+
+    foreach ($groupName in $groups.Keys) {
+      $groupNode = New-Object Windows.Controls.TreeViewItem
+      $groupNode.Header = $groupName
+      $groupNode.IsExpanded = $true
+      $groupVisible = $false
+
+      foreach ($sgName in $groups[$groupName].Keys) {
+        $sgNode = New-Object Windows.Controls.TreeViewItem
+        $sgNode.Header = $sgName
+        $sgNode.IsExpanded = $true
+        $sgVisible = $false
+
+        foreach ($item in $groups[$groupName][$sgName]) {
+          if ($filterLower -and
+            $item.Name.ToLowerInvariant() -notmatch $filterLower -and
+            $item.Group.ToLowerInvariant() -notmatch $filterLower -and
+            $item.SubGroup.ToLowerInvariant() -notmatch $filterLower) {
+            continue
+          }
+          if ($hideInstalled -and $item.IsInstalled) { continue }
+
+          $cb = New-Object Windows.Controls.CheckBox
+          $cb.Content = $item.Name
+          $cb.IsChecked = $item.Selected
+          if ($item.IsInstalled) {
+            $cb.Content = "$($item.Name) (Installed)"
+            $cb.Foreground = [Windows.Media.Brushes]::Gray
+          }
+          elseif ($item.Action) {
+            $cb.Content = "$($item.Name) (Action)"
+          }
+
+          $cb.Tag = $item
+          $cb.Add_Click({
+              $item.Selected = $cb.IsChecked -eq $true
+              Update-Count
+            })
+
+          $itemNode = New-Object Windows.Controls.TreeViewItem
+          $itemNode.Header = $cb
+          [void]$sgNode.Items.Add($itemNode)
+          $sgVisible = $true
         }
-        if (-not $groups[$item.Group].Contains($item.SubGroup)) {
-            $groups[$item.Group][$item.SubGroup] = @()
+
+        if ($sgVisible) {
+          [void]$groupNode.Items.Add($sgNode)
+          $groupVisible = $true
         }
-        $groups[$item.Group][$item.SubGroup] += $item
+      }
+
+      if ($groupVisible) {
+        [void]$tree.Items.Add($groupNode)
+      }
     }
 
-    function Update-Count {
-        $sel = @($selection | Where-Object { $_.Selected }).Count
-        $countText.Text = "$sel / $($selection.Count) items selected"
-    }
+    Update-Count
+  }
 
-    function Refresh-Tree {
-        param([string]$Filter = "")
+  Refresh-Tree
 
-        $tree.Items.Clear()
-        $filterLower = $Filter.ToLowerInvariant()
-        $hideInstalled = $hideCheck.IsChecked -eq $true
+  $searchBox.Add_TextChanged({ Refresh-Tree -Filter $searchBox.Text })
+  $hideCheck.Add_Checked({ Refresh-Tree -Filter $searchBox.Text })
+  $hideCheck.Add_Unchecked({ Refresh-Tree -Filter $searchBox.Text })
 
-        foreach ($groupName in $groups.Keys) {
-            $groupNode = New-Object Windows.Controls.TreeViewItem
-            $groupNode.Header = $groupName
-            $groupNode.IsExpanded = $true
-            $groupVisible = $false
-
-            foreach ($sgName in $groups[$groupName].Keys) {
-                $sgNode = New-Object Windows.Controls.TreeViewItem
-                $sgNode.Header = $sgName
-                $sgNode.IsExpanded = $true
-                $sgVisible = $false
-
-                foreach ($item in $groups[$groupName][$sgName]) {
-                    if ($filterLower -and
-                        $item.Name.ToLowerInvariant() -notmatch $filterLower -and
-                        $item.Group.ToLowerInvariant() -notmatch $filterLower -and
-                        $item.SubGroup.ToLowerInvariant() -notmatch $filterLower) {
-                        continue
-                    }
-                    if ($hideInstalled -and $item.IsInstalled) { continue }
-
-                    $cb = New-Object Windows.Controls.CheckBox
-                    $cb.Content = $item.Name
-                    $cb.IsChecked = $item.Selected
-                    if ($item.IsInstalled) {
-                        $cb.Content = "$($item.Name) (Installed)"
-                        $cb.Foreground = [Windows.Media.Brushes]::Gray
-                    }
-                    elseif ($item.Action) {
-                        $cb.Content = "$($item.Name) (Action)"
-                    }
-
-                    $cb.Tag = $item
-                    $cb.Add_Click({
-                        $item.Selected = $cb.IsChecked -eq $true
-                        Update-Count
-                    })
-
-                    $itemNode = New-Object Windows.Controls.TreeViewItem
-                    $itemNode.Header = $cb
-                    [void]$sgNode.Items.Add($itemNode)
-                    $sgVisible = $true
-                }
-
-                if ($sgVisible) {
-                    [void]$groupNode.Items.Add($sgNode)
-                    $groupVisible = $true
-                }
-            }
-
-            if ($groupVisible) {
-                [void]$tree.Items.Add($groupNode)
-            }
-        }
-
-        Update-Count
-    }
-
-    Refresh-Tree
-
-    $searchBox.Add_TextChanged({ Refresh-Tree -Filter $searchBox.Text })
-    $hideCheck.Add_Checked({ Refresh-Tree -Filter $searchBox.Text })
-    $hideCheck.Add_Unchecked({ Refresh-Tree -Filter $searchBox.Text })
-
-    $window.FindName("SelectAllBtn").Add_Click({
-        foreach ($item in $selection) { $item.Selected = $true }
-        Refresh-Tree -Filter $searchBox.Text
+  $window.FindName("SelectAllBtn").Add_Click({
+      foreach ($item in $selection) { $item.Selected = $true }
+      Refresh-Tree -Filter $searchBox.Text
     })
 
-    $window.FindName("SelectNoneBtn").Add_Click({
-        foreach ($item in $selection) { $item.Selected = $false }
-        Refresh-Tree -Filter $searchBox.Text
+  $window.FindName("SelectNoneBtn").Add_Click({
+      foreach ($item in $selection) { $item.Selected = $false }
+      Refresh-Tree -Filter $searchBox.Text
     })
 
-    $window.FindName("InstallBtn").Add_Click({
-        $sync.Result = @($selection | Where-Object { $_.Selected })
-        $window.Close()
+  $window.FindName("InstallBtn").Add_Click({
+      $sync.Result = @($selection | Where-Object { $_.Selected })
+      $window.Close()
     })
 
-    $window.FindName("CancelBtn").Add_Click({
-        $sync.Result = $null
-        $window.Close()
+  $window.FindName("CancelBtn").Add_Click({
+      $sync.Result = $null
+      $window.Close()
     })
 
-    $window.Add_Closing({
-        if ($null -eq $sync.Result) {
-            Write-Log "User canceled application selection. Exiting..." -Level "WARNING"
-            exit 0
-        }
-    })
-
-    $window.ShowDialog() | Out-Null
-
-    if ($null -eq $sync.Result) {
+  $window.Add_Closing({
+      if ($null -eq $sync.Result) {
         Write-Log "User canceled application selection. Exiting..." -Level "WARNING"
         exit 0
-    }
+      }
+    })
 
-    return $sync.Result
+  $window.ShowDialog() | Out-Null
+
+  if ($null -eq $sync.Result) {
+    Write-Log "User canceled application selection. Exiting..." -Level "WARNING"
+    exit 0
+  }
+
+  return $sync.Result
 }
 
 # ============================================================================
