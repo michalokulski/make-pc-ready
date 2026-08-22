@@ -28,6 +28,10 @@ lib/
 
 .github/workflows/
   lint.yml                       # CI: PSScriptAnalyzer + PowerShell-Beautifier on push/PR
+  release.yml                    # Release: packages 3 zips + GitHub Release on v* tag
+
+scripts/
+  Build-ReleasePackages.ps1      # Packaging: builds the 3 release zips into dist/
 
 Testing-Hyper-V/
   MakeTestVM.ps1                 # Hyper-V VM creator (Gen2, VHDX, unattended)
@@ -148,6 +152,29 @@ All steps happen in `lib/PCSetup.Common.psm1` — the shared catalog means no pe
 ```powershell
 .\Testing-QEMU\MakeTestVM-QEMU.ps1 -NonInteractive -ISOPath "C:\ISOs\Win11.iso" -VMName "QemuTest" -StartVM
 ```
+
+---
+
+## Release Process
+
+Releases are fully automated via GitHub Actions (`.github/workflows/release.yml`):
+
+```powershell
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+This produces a GitHub Release with three zips:
+- `MakePCReady-vX.Y.Z.zip` — app installer (both UIs + `lib/PCSetup.Common.psm1`)
+- `MakeTestVM-HyperV-vX.Y.Z.zip` — Hyper-V creator (+ `lib/VMCommon.psm1`)
+- `MakeTestVM-QEMU-vX.Y.Z.zip` — QEMU creator + `.sh` wrapper (+ `lib/VMCommon.psm1`)
+
+Notes:
+- Tags not matching `vX.Y.Z` fail the workflow. Tags containing `-alpha/-beta/-rc/-preview` are marked prerelease.
+- Changelogs are auto-generated from commits (`--generate-notes`).
+- The `.sh` file is normalized to LF line endings inside the zip (bash rejects CRLF).
+- `unattend.iso` is NOT packaged — scripts auto-generate it from `autounattend.xml`.
+- Local dry-run: `./scripts/Build-ReleasePackages.ps1 -Version "0.0.0-test"` (output in `dist/`, gitignored).
 
 ---
 

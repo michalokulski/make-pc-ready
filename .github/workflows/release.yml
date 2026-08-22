@@ -1,0 +1,57 @@
+name: Release
+
+# Creates a GitHub Release with three zip artifacts when a v* tag is pushed:
+#   - MakePCReady-vX.Y.Z.zip        (app installer: TUI + WPF GUI + shared module)
+#   - MakeTestVM-HyperV-vX.Y.Z.zip  (Hyper-V VM creator)
+#   - MakeTestVM-QEMU-vX.Y.Z.zip    (QEMU VM creator, cross-platform)
+#
+# Manual usage:
+#   git tag v1.0.0
+#   git push origin v1.0.0
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -notmatch '^v\d+\.\d+\.\d+.*$') {
+            Write-Host "::error::Tag '$tag' does not match expected 'vX.Y.Z' format."
+            exit 1
+          }
+          $version = $tag.TrimStart('v')
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          Write-Host "Releasing version $version (tag $tag)"
+
+      - name: Package artifacts
+        shell: pwsh
+        run: ./scripts/Build-ReleasePackages.ps1 -Version '${{ steps.version.outputs.version }}'
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ steps.version.outputs.tag }}"
+          $prerelease = if ($tag -match '-(alpha|beta|rc|preview)') { '--prerelease' } else { '' }
+          gh release create $tag `
+            --title "MakePCReady $tag" `
+            --generate-notes `
+            $prerelease `
+            dist/*.zip
