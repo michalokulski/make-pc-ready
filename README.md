@@ -1,11 +1,11 @@
 # MakePCReady - Automated PC Setup Script
 
-Tired of configuring your PC after a rebuild? This PowerShell script automates the installation of 120+ applications using Winget with comprehensive logging.
+Tired of configuring your PC after a rebuild? This PowerShell script automates the installation of 115+ applications using Winget with comprehensive logging.
 
 ## Features
 
 ✅ **Collapsible Tree TUI** - Full keyboard-driven selector with collapsible groups/subgroups  
-✅ **120+ Package Catalog** - Applications, gaming, AI/LLM, runtimes, .NET, Java, and more  
+✅ **115+ Package Catalog** - Applications, gaming, AI/LLM, runtimes, .NET, Java, and more  
 ✅ **Smart Installed Detection** - Dual-strategy detection: JSON snapshot (`winget list --output json`) on v1.6+, with automatic text table parsing fallback for older Winget versions  
 ✅ **Filter & Hide Installed** - Real-time text filter and toggle to hide already-installed packages  
 ✅ **WPF GUI Alternative** - A separate WPF-based graphical interface for the same catalog  
@@ -117,21 +117,22 @@ PowerShell Version: 7.4.0
 14:30:52 [SUCCESS] Winget upgraded: v1.12.470 -> v1.13.123
 14:30:53 [INFO] Updating Winget package sources...
 14:30:59 [SUCCESS] Winget sources updated successfully
-14:31:00 [INFO] ======== Starting package installation ========
-14:31:02 [INFO] Installing: 7-Zip (7zip.7zip)...
-14:31:15 [SUCCESS] ✓ Successfully installed: 7-Zip
+14:31:00 [INFO] ========================================
+14:31:00 [INFO] Starting application installation (Total: 10)
+14:31:02 [INFO] Installing: 7-Zip (7zip.7zip)
+14:31:15 [SUCCESS] Installed: 7-Zip
 14:31:17 [INFO] Installing: Git (Git.Git)...
-14:31:42 [SUCCESS] ✓ Successfully installed: Git
+14:31:42 [SUCCESS] Installed: Git
 ...
-14:35:20 [SUCCESS] ======== Setup Complete! ========
-14:35:20 [INFO] Total Installed: 10
-14:35:20 [INFO] Total Failed: 0
+14:35:20 [SUCCESS] Setup Complete
+14:35:20 [INFO] Total Applications Installed: 10
+14:35:20 [INFO] Total Applications Failed: 0
 14:35:20 [INFO] Elapsed time: 00:04:45.2156234
 ```
 
 ## Customizing Packages
 
-Edit the `$appCatalog` array at the beginning of `MakePCReady.ps1` to change the available applications.
+Edit the `$appCatalog` array in `lib\PCSetup.Common.psm1` to change the available applications. The catalog is shared by both `MakePCReady.ps1` (TUI) and `MakePCReadyAlternativeGUI.ps1` (WPF GUI).
 
 ### Catalog Entry Format
 ```powershell
@@ -163,7 +164,7 @@ winget search "application name"
 
 ## Default Application Catalog
 
-The catalog includes 120+ entries organized into groups and subgroups:
+The catalog includes 115+ entries organized into groups and subgroups:
 
 ### Applications
 
@@ -310,6 +311,9 @@ Check the log file for specific error messages. Common issues:
 
 ## Script Functions
 
+Shared logic lives in `lib\PCSetup.Common.psm1` (imported by both installer scripts):
+
+- **Initialize-PCSetupState** - Initializes module state (log path, start time) — must be called after Import-Module
 - **Initialize-Log** - Creates and initializes log file
 - **Write-Log** - Logs messages with color coding
 - **Test-AdminPrivileges** - Validates admin rights
@@ -330,6 +334,8 @@ Check the log file for specific error messages. Common issues:
 - **Enable-HyperV** - Checks current state and enables Hyper-V when needed
 - **Invoke-SelectedAction** - Dispatches a catalog entry to its install handler
 - **Invoke-PCSetup** - Main orchestration function
+
+The VM creator scripts (`Testing-Hyper-V`, `Testing-QEMU`) share `lib\VMCommon.psm1` — see their respective READMEs in those folders.
 
 ## Notes
 

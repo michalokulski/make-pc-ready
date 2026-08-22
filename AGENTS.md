@@ -20,13 +20,14 @@ README.md                        # User-facing docs
 AGENTS.md                        # This file — LLM agent guide
 .editorconfig                    # Consistent formatting rules
 .gitignore                       # Ignore logs, ISOs, VM storage
+PSScriptAnalyzerSettings.psd1    # Lint rule config (used by CI + local runs)
 
 lib/
   PCSetup.Common.psm1            # Shared module: catalog, winget, install, actions, Invoke-PCSetup
-  VMCommon.psm1                  # Shared module: logging, validation, ISO menu, Complete-Log
+  VMCommon.psm1                  # Shared module: logging, validation, ISO menu, ISO download/build, Complete-Log
 
 .github/workflows/
-  lint.yml                       # CI: PSScriptAnalyzer on push/PR
+  lint.yml                       # CI: PSScriptAnalyzer + PowerShell-Beautifier on push/PR
 
 Testing-Hyper-V/
   MakeTestVM.ps1                 # Hyper-V VM creator (Gen2, VHDX, unattended)
@@ -46,22 +47,24 @@ Testing-QEMU/
 
 ## Architecture & Shared Code
 
-### Refactored (2026-08-09)
+### Architecture (as of 2026-08-22)
 
-Shared code extracted into two modules under `lib/`:
+Shared code lives in two modules under `lib/`:
 
-- **`lib/PCSetup.Common.psm1`** — All shared logic for app installers: `$appCatalog`, `$vcRedistPackages`, `$vcRedistAioPackage`, `Initialize-Log`, `Write-Log`, `Test-AdminPrivileges`, `Resolve-WingetPath`, `Invoke-WingetCommand`, `Ensure-Winget`, `Update-WingetSources`, `Initialize-InstalledCacheFromWinget`, `Test-PackageInstalled`, `Test-BundleInstalled`, `Test-WindowsFeatureEnabled`, `Enable-WindowsFeatureIfNeeded`, `Test-DotNetFx4xInstalled`, `Ensure-DotNetFramework4x`, `Get-CatalogItemInstalledState`, `Invoke-SelectedAction`, `Install-Package`, `Install-Packages`, `Install-VCRedist`, `Install-VCRedistAIO`, `Install-WSLFromWinget`, `Upgrade-AllWingetPackages`, `Trigger-WindowsUpdate`, `Enable-HyperV`, `Invoke-PCSetup`.
-- **`lib/VMCommon.psm1`** — Shared logic for VM scripts: `Initialize-Log`, `Write-Log`, `Read-ValidatedInteger`, `Read-PositiveInteger`, `Show-ISOSourceMenu`, `Complete-Log`.
+- **`lib/PCSetup.Common.psm1`** — All shared logic for app installers: `Initialize-PCSetupState`, `$appCatalog`, `$vcRedistPackages`, `$vcRedistAioPackage`, `Initialize-Log`, `Write-Log`, `Test-AdminPrivileges`, `Resolve-WingetPath`, `Invoke-WingetCommand`, `Ensure-Winget`, `Update-WingetSources`, `Initialize-InstalledCacheFromWinget`, `Test-PackageInstalled`, `Test-BundleInstalled`, `Test-WindowsFeatureEnabled`, `Enable-WindowsFeatureIfNeeded`, `Test-DotNetFx4xInstalled`, `Ensure-DotNetFramework4x`, `Get-CatalogItemInstalledState`, `Invoke-SelectedAction`, `Install-Package`, `Install-Packages`, `Install-VCRedist`, `Install-VCRedistAIO`, `Install-WSLFromWinget`, `Upgrade-AllWingetPackages`, `Trigger-WindowsUpdate`, `Enable-HyperV`, `Invoke-PCSetup`.
+- **`lib/VMCommon.psm1`** — Shared logic for VM scripts: `Initialize-VMCommonState`, `Initialize-Log`, `Write-Log`, `Read-ValidatedInteger`, `Read-PositiveInteger`, `Show-ISOSourceMenu`, `Invoke-FileDownload`, `Get-WindowsISOViaFido`, `Get-WindowsISOViaUUPDump`, `Set-SelectedISOLanguage`, `Get-SelectedISOLanguage`, `Complete-Log`.
 
-**`MakePCReady.ps1`** and **`MakePCReadyAlternativeGUI.ps1`** now only define their respective `Show-InteractiveAppSelector` (TUI tree vs WPF GUI) and call `Invoke-PCSetup -ShowSelector`.
+**`MakePCReady.ps1`** and **`MakePCReadyAlternativeGUI.ps1`** only define their respective `Show-InteractiveAppSelector` (TUI tree vs WPF GUI) and call `Invoke-PCSetup -ShowSelector`.
 
-**`Testing-Hyper-V/MakeTestVM.ps1`** and **`Testing-QEMU/MakeTestVM-QEMU.ps1`** import `VMCommon.psm1` and only define their hypervisor-specific logic.
+**`Testing-Hyper-V/MakeTestVM.ps1`** and **`Testing-QEMU/MakeTestVM-QEMU.ps1`** import `VMCommon.psm1` and only define their hypervisor-specific logic:
+- Hyper-V keeps: `Test-HyperVAvailable`, `Test-NonInteractiveConfig`, `Select-LocalISO`, `Get-AvailableVMSwitches`, `Show-VMConfigMenu`, `New-TestVM`, `Send-VMBootKeystroke`, `Show-Summary`, `New-UnattendISO`
+- QEMU keeps: `Resolve-CommandPath`, `Test-Prerequisites`, `Find-OVMFFirmware`, accelerator logic, `Resolve-WindowsISOPath`, `Show-VMConfigMenu`, `Initialize-VMStorage`, `Get-QemuLaunchParameters`, `New-UnattendISO`
+
+ISO acquisition (`Get-WindowsISOViaFido`, `Get-WindowsISOViaUUPDump`, `Invoke-FileDownload`) is fully shared. The QEMU script must call `Get-WindowsISOViaUUPDump -IncludeLinuxRunner` to enable the Linux UUP runner; Hyper-V omits the switch (Windows-only).
 
 ### Remaining Duplication
 
-- `Get-WindowsISOViaFido` — nearly identical between Hyper-V and QEMU (QEMU uses `Invoke-FileDownload` helper)
-- `Get-WindowsISOViaUUPDump` — nearly identical (QEMU has Linux support)
-- `Show-VMConfigMenu` — similar pattern but hypervisor-specific parameters
+- `Show-VMConfigMenu` — similar pattern but hypervisor-specific parameters (Hyper-V uses Get-VMSwitch; QEMU selects accelerator)
 
 ### Two autounattend.xml Differences
 
@@ -76,6 +79,7 @@ If you regenerate one, check whether the other needs the same change.
 ## Key Patterns & Conventions
 
 ### PowerShell Patterns
+- **Module state initialization** — `Import-Module` gives modules an isolated scope. Entry scripts must call `Initialize-PCSetupState` (PCSetup.Common) or `Initialize-VMCommonState` (VMCommon) with `-LogPath`/`-StartTime` AFTER importing; never assign `$script:logFile` in the entry script, module functions cannot see it.
 - **`$script:` scope** for module-level variables (not `$global:`)
 - **`[PSCustomObject]@{}`** for catalog entries and config hashmaps
 - **`Write-Log`** with levels: `SUCCESS`, `INFO`, `WARNING`, `ERROR`; `-NoConsole` for log-only
@@ -106,7 +110,7 @@ Cache stored in `$script:installedCache` (hashtable: PackageId → $true/$false)
 
 ## How to Add a New App
 
-1. Add entry to `$appCatalog` in **both** `MakePCReady.ps1` and `MakePCReadyAlternativeGUI.ps1`
+1. Add entry to `$appCatalog` in `lib/PCSetup.Common.psm1` (single shared catalog — both UIs pick it up automatically)
 2. Format: `[PSCustomObject]@{ Group = "..."; SubGroup = "..."; Id = "Winget.PackageId"; Name = "Display Name"; DefaultSelected = $false }`
 3. Verify the Winget ID exists: `winget search "name"`
 4. Update README.md catalog tables
@@ -119,7 +123,8 @@ Cache stored in `$script:installedCache` (hashtable: PackageId → $true/$false)
 2. Add case to `Get-CatalogItemInstalledState` (return `$true`/`$false` for installed detection)
 3. Add case to `Invoke-SelectedAction` (call your implementation function)
 4. Implement the function
-5. Do this in **both** `MakePCReady.ps1` and `MakePCReadyAlternativeGUI.ps1`
+
+All steps happen in `lib/PCSetup.Common.psm1` — the shared catalog means no per-UI duplication.
 
 ---
 
@@ -148,10 +153,10 @@ Cache stored in `$script:installedCache` (hashtable: PackageId → $true/$false)
 
 ## Known Issues / Tech Debt
 
-1. **Remaining ISO download duplication** — `Get-WindowsISOViaFido` and `Get-WindowsISOViaUUPDump` are nearly identical between Hyper-V and QEMU scripts. QEMU version has cross-platform support.
+1. **~~Remaining ISO download duplication~~ RESOLVED (2026-08-22)** — `Get-WindowsISOViaFido`, `Get-WindowsISOViaUUPDump`, and `Invoke-FileDownload` now live in `lib/VMCommon.psm1`. The QEMU script passes `-IncludeLinuxRunner` to enable the Linux UUP runner; the selected ISO language is shared via `Set-SelectedISOLanguage`/`Get-SelectedISOLanguage`.
 2. **No unattend.iso in repo** — Both `Testing-*/unattend.iso` are gitignored (binary). Both scripts now auto-generate from `autounattend.xml` if missing.
 3. **Two diverged autounattend.xml** — Hyper-V and QEMU versions differ in disk assertion. Both files now have inline comments documenting the difference.
-4. **README says "120+"** — Catalog count is approximate. Update when adding/removing entries.
+4. **README says "115+"** — Catalog count is 117 entries. Update when adding/removing entries.
 5. **WPF GUI script** — `MakePCReadyAlternativeGUI.ps1` uses Windows-only WPF. No fallback for PowerShell 7 without Windows Desktop.
 6. **`winget install --silent`** — Some packages ignore `--silent` and show GUI installers. No workaround.
 

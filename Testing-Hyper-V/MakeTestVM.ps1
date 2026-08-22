@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$VMName,
   [string]$ISOPath,
   [string]$SwitchName,
@@ -21,13 +21,14 @@ param(
 # Unattend: repo-hosted unattend.iso (generate XML at schneegans.de, wrap in ISO).
 # ============================================================================
 
-$script:logFile = $LogPath
-$script:logStartTime = Get-Date
 $script:scriptRoot = $PSScriptRoot
-$script:selectedISOLanguage = $null
 
-# Import shared VM module
+# Import shared VM module (must be imported BEFORE initializing module state)
 Import-Module -Force (Join-Path -Path $PSScriptRoot -ChildPath "..\lib\VMCommon.psm1")
+
+# Hand the log path/start time to the module — Import-Module scopes are isolated,
+# so assigning $script:logFile here would be invisible to the module's functions.
+Initialize-VMCommonState -LogPath $LogPath -StartTime (Get-Date)
 
 # ============================================================================
 # Prerequisites
@@ -140,413 +141,9 @@ function Test-NonInteractiveConfig {
 # ============================================================================
 # ISO Acquisition
 # ============================================================================
-
-function Get-WindowsISOViaFido {
-  param(
-    [string]$DownloadFolder
-  )
-
-  Write-Log "Downloading Windows ISO via FIDO.ps1..." -Level "INFO"
-
-  if (-not (Test-Path -Path $DownloadFolder)) {
-    Write-Log "Creating download folder: $DownloadFolder" -Level "INFO"
-    New-Item -ItemType Directory -Path $DownloadFolder -Force | Out-Null
-  }
-
-  # ---- Windows Version Selection ----
-  Write-Host ""
-  Write-Host "Select Windows version:" -ForegroundColor Cyan
-  Write-Host "  [1] Windows 11 (recommended)" -ForegroundColor White
-  Write-Host "  [2] Windows 10" -ForegroundColor White
-  Write-Host ""
-
-  do {
-    $osChoice = Read-Host "Select version (1-2) [1]"
-    if ([string]::IsNullOrWhiteSpace($osChoice)) { $osChoice = "1" }
-  } while ($osChoice -notin @("1","2"))
-
-  if ($osChoice -eq "1") {
-    $fidoWin = "Windows 11"
-    $fidoEd = "Windows 11 Home/Pro/Edu"
-    $defaultFileName = "Windows11.iso"
-  } else {
-    $fidoWin = "Windows 10"
-    $fidoEd = "Windows 10 Home/Pro/Edu"
-    $defaultFileName = "Windows10.iso"
-  }
-
-  # ---- Language Selection ----
-  $languages = @(
-    @{ Name = "English (US)"; Code = "English" },
-    @{ Name = "English International"; Code = "English International" },
-    @{ Name = "German"; Code = "German" },
-    @{ Name = "French"; Code = "French" },
-    @{ Name = "Spanish"; Code = "Spanish" },
-    @{ Name = "Italian"; Code = "Italian" },
-    @{ Name = "Portuguese (Brazil)"; Code = "Brazilian Portuguese" },
-    @{ Name = "Dutch"; Code = "Dutch" },
-    @{ Name = "Japanese"; Code = "Japanese" },
-    @{ Name = "Korean"; Code = "Korean" },
-    @{ Name = "Chinese Simplified"; Code = "Chinese (Simplified)" },
-    @{ Name = "Chinese Traditional"; Code = "Chinese (Traditional)" },
-    @{ Name = "Russian"; Code = "Russian" },
-    @{ Name = "Polish"; Code = "Polish" },
-    @{ Name = "Swedish"; Code = "Swedish" },
-    @{ Name = "Turkish"; Code = "Turkish" },
-    @{ Name = "Arabic"; Code = "Arabic" }
-  )
-
-  Write-Host ""
-  Write-Host "Select language:" -ForegroundColor Cyan
-  for ($i = 0; $i -lt $languages.Count; $i++) {
-    Write-Host "  [$($i+1)] $($languages[$i].Name)" -ForegroundColor White
-  }
-  Write-Host ""
-
-  $langChoice = Read-ValidatedInteger -Prompt "Select language (1-$($languages.Count)) [1]" -Min 1 -Max $languages.Count -DefaultValue 1
-
-  $fidoLang = $languages[$langChoice - 1].Code
-  $script:selectedISOLanguage = $fidoLang
-
-  # Warn about non-English ISO and unattend compatibility
-  if ($fidoLang -notin @("English","English International")) {
-    Write-Host ""
-    Write-Host "  WARNING: The included autounattend.xml is configured for English (en-US)." -ForegroundColor Yellow
-    Write-Host "  A non-English ISO may cause the unattended installation to fail or require" -ForegroundColor Yellow
-    Write-Host "  manual intervention (e.g. language/locale prompts, edition mismatches)." -ForegroundColor Yellow
-    Write-Host "  For fully automatic installation, use an English ISO or a matching unattend.iso." -ForegroundColor Yellow
-    Write-Host ""
-    Write-Log "Non-English ISO language selected ('$fidoLang'). Bundled autounattend.xml is for en-US." -Level "WARNING"
-  }
-
-  # ---- Architecture Selection ----
-  Write-Host ""
-  Write-Host "Select architecture:" -ForegroundColor Cyan
-  Write-Host "  [1] x64 (recommended)" -ForegroundColor White
-  $hostArch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
-  $arm64Supported = ($hostArch -eq "ARM64")
-
-  if ($fidoWin -eq "Windows 11" -and $arm64Supported) {
-    Write-Host "  [2] ARM64" -ForegroundColor White
-  }
-  elseif ($fidoWin -eq "Windows 11") {
-    Write-Host "  ARM64 option hidden (host architecture: $hostArch)" -ForegroundColor Gray
-  }
-  Write-Host ""
-
-  $maxArchChoice = if ($fidoWin -eq "Windows 11" -and $arm64Supported) { 2 } else { 1 }
-  $archChoice = Read-ValidatedInteger -Prompt "Select architecture (1-$maxArchChoice) [1]" -Min 1 -Max $maxArchChoice -DefaultValue 1
-
-  $fidoArch = if ($archChoice -eq 2) { "ARM64" } else { "x64" }
-
-  Write-Log "Selected: $fidoWin, Edition=$fidoEd, Language=$fidoLang, Architecture=$fidoArch" -Level "INFO"
-
-  # ---- Download FIDO.ps1 ----
-  $fidoUrl = "https://raw.githubusercontent.com/pbatard/Fido/master/Fido.ps1"
-  $fidoPath = Join-Path -Path $env:TEMP -ChildPath "Fido.ps1"
-
-  try {
-    Write-Log "Fetching FIDO.ps1 from GitHub..." -Level "INFO"
-    Invoke-WebRequest -Uri $fidoUrl -OutFile $fidoPath -UseBasicParsing -ErrorAction Stop
-    Unblock-File -Path $fidoPath -ErrorAction SilentlyContinue
-    Write-Log "FIDO.ps1 downloaded successfully" -Level "SUCCESS"
-  }
-  catch {
-    Write-Log "Failed to download FIDO.ps1: $($_.Exception.Message)" -Level "ERROR"
-    return $null
-  }
-
-  # Get the download URL using FIDO in command-line mode
-  Write-Log "Querying Microsoft for $fidoWin ISO download link..." -Level "INFO"
-  Write-Log "This may take a moment as FIDO negotiates with Microsoft's servers..." -Level "INFO"
-
-  try {
-    $fidoOutput = @(& $fidoPath -Win $fidoWin -Rel "Latest" -Ed $fidoEd -Lang $fidoLang -Arch $fidoArch -GetUrl)
-    # FIDO may emit multiple lines; the URL is the last valid one
-    $isoUrl = $fidoOutput | Where-Object { $_ -match "^https?://" } | Select-Object -Last 1
-    if (-not $isoUrl) {
-      Write-Log "FIDO did not return a valid download URL." -Level "ERROR"
-      Write-Log "FIDO output: $($fidoOutput -join ' | ')" -Level "ERROR" -NoConsole
-      return $null
-    }
-
-    Write-Log "Download URL obtained: $($isoUrl.Substring(0, [Math]::Min(80, $isoUrl.Length)))..." -Level "SUCCESS"
-
-    # Extract filename from URL
-    $fileName = [System.IO.Path]::GetFileName(([uri]$isoUrl).LocalPath)
-    if (-not $fileName -or -not $fileName.EndsWith(".iso")) {
-      $fileName = $defaultFileName
-    }
-
-    $outputPath = Join-Path -Path $DownloadFolder -ChildPath $fileName
-
-    if (Test-Path -Path $outputPath) {
-      Write-Log "ISO already exists at: $outputPath - skipping download" -Level "INFO"
-      return $outputPath
-    }
-
-    Write-Log "Downloading ISO to: $outputPath" -Level "INFO"
-    Write-Log "This will take a while (ISO is typically 5-6 GB)..." -Level "INFO"
-
-    try {
-      Start-BitsTransfer -Source $isoUrl -Destination $outputPath -ErrorAction Stop
-    }
-    catch {
-      Write-Log "BITS transfer failed, falling back to Invoke-WebRequest: $($_.Exception.Message)" -Level "WARNING"
-      Invoke-WebRequest -Uri $isoUrl -OutFile $outputPath -UseBasicParsing -ErrorAction Stop
-    }
-
-    if (Test-Path -Path $outputPath) {
-      $fileSize = [math]::Round((Get-Item $outputPath).Length / 1GB,2)
-      Write-Log "ISO downloaded successfully ($fileSize GB): $outputPath" -Level "SUCCESS"
-      return $outputPath
-    }
-
-    Write-Log "ISO file not found after download." -Level "ERROR"
-    return $null
-  }
-  catch {
-    Write-Log "Failed during FIDO ISO download: $($_.Exception.Message)" -Level "ERROR"
-    return $null
-  }
-  finally {
-    Remove-Item -Path $fidoPath -Force -ErrorAction SilentlyContinue
-  }
-}
-
-function Get-WindowsISOViaUUPDump {
-  param(
-    [string]$DownloadFolder
-  )
-
-  Write-Log "Building Windows ISO via UUP dump..." -Level "INFO"
-
-  if (-not (Test-Path -Path $DownloadFolder)) {
-    Write-Log "Creating download folder: $DownloadFolder" -Level "INFO"
-    New-Item -ItemType Directory -Path $DownloadFolder -Force | Out-Null
-  }
-
-  # ---- OS Selection ----
-  Write-Host ""
-  Write-Host "Select Windows version to search:" -ForegroundColor Cyan
-  Write-Host "  [1] Windows 11 (recommended)" -ForegroundColor White
-  Write-Host "  [2] Windows 10" -ForegroundColor White
-  Write-Host ""
-
-  do {
-    $osChoice = Read-Host "Select version (1-2) [1]"
-    if ([string]::IsNullOrWhiteSpace($osChoice)) { $osChoice = "1" }
-  } while ($osChoice -notin @("1","2"))
-
-  if ($osChoice -eq "1") {
-    $searchQuery = "Windows+11"
-    $titleFilter = "Windows 11, version"
-    $osLabel = "Windows 11"
-  } else {
-    $searchQuery = "Windows+10"
-    $titleFilter = "Windows 10, version"
-    $osLabel = "Windows 10"
-  }
-
-  # Step 1: Query UUP dump API for available builds
-  Write-Log "Querying UUP dump API for available $osLabel builds..." -Level "INFO"
-
-  try {
-    $apiUrl = "https://api.uupdump.net/listid.php?search=$searchQuery&sortByDate=1"
-    $response = Invoke-RestMethod -Uri $apiUrl -UseBasicParsing -ErrorAction Stop
-  }
-  catch {
-    Write-Log "Failed to query UUP dump API: $($_.Exception.Message)" -Level "ERROR"
-    return $null
-  }
-
-  if (-not $response.response.builds) {
-    Write-Log "UUP dump API returned no builds." -Level "ERROR"
-    return $null
-  }
-
-  # UUP dump API returns builds as a PSObject with numbered keys, not an array
-  $allBuilds = @($response.response.builds.PSObject.Properties.Value)
-
-  # Filter for stable x64 builds (non-Insider, non-Server, non-Cumulative Update)
-  $stableBuilds = @($allBuilds | Where-Object {
-      $_.arch -eq "amd64" -and
-      $_.title -notmatch "Insider|Server|Cumulative|Preview Update|Security Update" -and
-      $_.title -match $titleFilter
-    } | Select-Object -First 10)
-
-  if ($stableBuilds.Count -eq 0) {
-    Write-Log "No stable $osLabel builds found on UUP dump." -Level "ERROR"
-    return $null
-  }
-
-  # Show available builds
-  Write-Host ""
-  Write-Host "Available $osLabel builds from UUP dump:" -ForegroundColor Cyan
-  Write-Host ""
-  for ($i = 0; $i -lt $stableBuilds.Count; $i++) {
-    $b = $stableBuilds[$i]
-    $date = [DateTimeOffset]::FromUnixTimeSeconds($b.created).LocalDateTime.ToString("yyyy-MM-dd")
-    Write-Host "  [$($i+1)] $($b.title) ($date)" -ForegroundColor White
-  }
-  Write-Host ""
-
-  $buildChoice = Read-ValidatedInteger -Prompt "Select build (1-$($stableBuilds.Count)) [1]" -Min 1 -Max $stableBuilds.Count -DefaultValue 1
-
-  $selectedBuild = $stableBuilds[$buildChoice - 1]
-  Write-Log "Selected: $($selectedBuild.title) (UUID: $($selectedBuild.uuid))" -Level "INFO"
-
-  # ---- Language Selection (dynamic from API) ----
-  Write-Log "Querying available languages for this build..." -Level "INFO"
-
-  try {
-    $langUrl = "https://api.uupdump.net/listlangs.php?id=$($selectedBuild.uuid)"
-    $langResponse = Invoke-RestMethod -Uri $langUrl -UseBasicParsing -ErrorAction Stop
-  }
-  catch {
-    Write-Log "Failed to query languages: $($_.Exception.Message)" -Level "ERROR"
-    return $null
-  }
-
-  $langCodes = @($langResponse.response.langFancyNames.PSObject.Properties | Sort-Object Value)
-
-  if ($langCodes.Count -eq 0) {
-    Write-Log "No languages available for this build." -Level "ERROR"
-    return $null
-  }
-
-  Write-Host ""
-  Write-Host "Available languages:" -ForegroundColor Cyan
-  $defaultLangIdx = 1
-  for ($i = 0; $i -lt $langCodes.Count; $i++) {
-    Write-Host "  [$($i+1)] $($langCodes[$i].Value) ($($langCodes[$i].Name))" -ForegroundColor White
-    if ($langCodes[$i].Name -eq "en-us") { $defaultLangIdx = $i + 1 }
-  }
-  Write-Host ""
-
-  $langChoice = Read-ValidatedInteger -Prompt "Select language (1-$($langCodes.Count)) [$defaultLangIdx]" -Min 1 -Max $langCodes.Count -DefaultValue $defaultLangIdx
-
-  $selectedLang = $langCodes[$langChoice - 1].Name
-  $script:selectedISOLanguage = $selectedLang
-  Write-Log "Selected language: $selectedLang" -Level "INFO"
-
-  # Warn about non-English ISO and unattend compatibility
-  if ($selectedLang -notmatch '^en-') {
-    Write-Host ""
-    Write-Host "  WARNING: The included autounattend.xml is configured for English (en-US)." -ForegroundColor Yellow
-    Write-Host "  A non-English ISO may cause the unattended installation to fail or require" -ForegroundColor Yellow
-    Write-Host "  manual intervention (e.g. language/locale prompts, edition mismatches)." -ForegroundColor Yellow
-    Write-Host "  For fully automatic installation, use an English ISO or a matching unattend.iso." -ForegroundColor Yellow
-    Write-Host ""
-    Write-Log "Non-English ISO language selected ('$selectedLang'). Bundled autounattend.xml is for en-US." -Level "WARNING"
-  }
-
-  # ---- Edition Selection (dynamic from API) ----
-  Write-Log "Querying available editions..." -Level "INFO"
-
-  try {
-    $edUrl = "https://api.uupdump.net/listeditions.php?lang=$selectedLang&id=$($selectedBuild.uuid)"
-    $edResponse = Invoke-RestMethod -Uri $edUrl -UseBasicParsing -ErrorAction Stop
-  }
-  catch {
-    Write-Log "Failed to query editions: $($_.Exception.Message)" -Level "ERROR"
-    return $null
-  }
-
-  $editions = @($edResponse.response.editionFancyNames.PSObject.Properties | Sort-Object Value)
-
-  if ($editions.Count -eq 0) {
-    Write-Log "No editions available for this build and language." -Level "ERROR"
-    return $null
-  }
-
-  Write-Host ""
-  Write-Host "Available editions:" -ForegroundColor Cyan
-  $defaultEdIdx = 1
-  for ($i = 0; $i -lt $editions.Count; $i++) {
-    Write-Host "  [$($i+1)] $($editions[$i].Value) ($($editions[$i].Name))" -ForegroundColor White
-    if ($editions[$i].Name -eq "professional") { $defaultEdIdx = $i + 1 }
-  }
-  Write-Host ""
-
-  $edChoice = Read-ValidatedInteger -Prompt "Select edition (1-$($editions.Count)) [$defaultEdIdx]" -Min 1 -Max $editions.Count -DefaultValue $defaultEdIdx
-
-  $selectedEdition = $editions[$edChoice - 1].Name
-  Write-Log "Selected edition: $selectedEdition" -Level "INFO"
-
-  # Step 2: Download the UUP dump creation package
-  $packageUrl = "https://uupdump.net/get.php?id=$($selectedBuild.uuid)&pack=$selectedLang&edition=$selectedEdition&autodl=2"
-  $packageZip = Join-Path -Path $env:TEMP -ChildPath "uupdump_package.zip"
-  $packageDir = Join-Path -Path $env:TEMP -ChildPath "uupdump_work"
-
-  Write-Log "Downloading UUP dump creation package..." -Level "INFO"
-
-  try {
-    Invoke-WebRequest -Uri $packageUrl -OutFile $packageZip -UseBasicParsing -ErrorAction Stop
-  }
-  catch {
-    Write-Log "Failed to download UUP dump package: $($_.Exception.Message)" -Level "ERROR"
-    Write-Log "You can manually download from: https://uupdump.net/selectlang.php?id=$($selectedBuild.uuid)" -Level "INFO"
-    return $null
-  }
-
-  # Step 3: Extract and run the converter
-  if (Test-Path -Path $packageDir) {
-    Remove-Item -Path $packageDir -Recurse -Force
-  }
-
-  Write-Log "Extracting UUP dump package..." -Level "INFO"
-  try {
-    Expand-Archive -Path $packageZip -DestinationPath $packageDir -Force -ErrorAction Stop
-  }
-  catch {
-    Write-Log "Failed to extract package: $($_.Exception.Message)" -Level "ERROR"
-    return $null
-  }
-
-  $cmdScript = Join-Path -Path $packageDir -ChildPath "uup_download_windows.cmd"
-  if (-not (Test-Path -Path $cmdScript)) {
-    Write-Log "uup_download_windows.cmd not found in the package." -Level "ERROR"
-    Write-Log "Package contents: $(Get-ChildItem $packageDir -Name | Out-String)" -Level "WARNING"
-    return $null
-  }
-
-  Write-Log "Running UUP dump converter (this downloads UUPs and builds the ISO)..." -Level "INFO"
-  Write-Log "This will take a LONG time (downloading ~4 GB of UUP files + conversion)..." -Level "WARNING"
-  Write-Log "A new window will open - do NOT close it until it finishes." -Level "WARNING"
-
-  try {
-    $process = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$cmdScript`"" `
-       -WorkingDirectory $packageDir -Wait -Passthru
-    Write-Log "UUP dump converter exited with code: $($process.ExitCode)" -Level "INFO"
-  }
-  catch {
-    Write-Log "Failed to run UUP dump converter: $($_.Exception.Message)" -Level "ERROR"
-    return $null
-  }
-
-  # Step 4: Find the resulting ISO
-  $resultISOs = @(Get-ChildItem -Path $packageDir -Filter "*.iso" -File -ErrorAction SilentlyContinue)
-  if ($resultISOs.Count -eq 0) {
-    Write-Log "No ISO file was produced by the UUP dump converter." -Level "ERROR"
-    Write-Log "Check the converter window for errors." -Level "INFO"
-    return $null
-  }
-
-  $sourceISO = $resultISOs | Sort-Object Length -Descending | Select-Object -First 1
-  $destISO = Join-Path -Path $DownloadFolder -ChildPath $sourceISO.Name
-
-  Write-Log "Moving built ISO to: $destISO" -Level "INFO"
-  Move-Item -Path $sourceISO.FullName -Destination $destISO -Force
-
-  # Cleanup temp files
-  Remove-Item -Path $packageZip -Force -ErrorAction SilentlyContinue
-  Remove-Item -Path $packageDir -Recurse -Force -ErrorAction SilentlyContinue
-
-  $fileSize = [math]::Round((Get-Item $destISO).Length / 1GB,2)
-  Write-Log "ISO built successfully ($fileSize GB): $destISO" -Level "SUCCESS"
-  return $destISO
-}
+# Get-WindowsISOViaFido and Get-WindowsISOViaUUPDump now live in lib\VMCommon.psm1.
+# Only the Windows-only local file picker remains here.
+# ============================================================================
 
 function Select-LocalISO {
   Add-Type -AssemblyName System.Windows.Forms
@@ -870,16 +467,17 @@ function Show-Summary {
   Write-Host ""
 
   # Language compatibility warning
-  $isEnglishISO = $script:selectedISOLanguage -and (
-    $script:selectedISOLanguage -in @("English","English International") -or
-    $script:selectedISOLanguage -match '^en-'
+  $selectedISOLanguage = Get-SelectedISOLanguage
+  $isEnglishISO = $selectedISOLanguage -and (
+    $selectedISOLanguage -in @("English","English International") -or
+    $selectedISOLanguage -match '^en-'
   )
-  if ($script:selectedISOLanguage -and -not $isEnglishISO) {
-    Write-Host "  WARNING: ISO language '$($script:selectedISOLanguage)' differs from the" -ForegroundColor Yellow
+  if ($selectedISOLanguage -and -not $isEnglishISO) {
+    Write-Host "  WARNING: ISO language '$($selectedISOLanguage)' differs from the" -ForegroundColor Yellow
     Write-Host "  bundled autounattend.xml (en-US). Installation may not be fully automatic." -ForegroundColor Yellow
     Write-Host ""
   }
-  elseif (-not $script:selectedISOLanguage) {
+  elseif (-not $selectedISOLanguage) {
     Write-Host "  NOTE: ISO language unknown. The bundled autounattend.xml is for English (en-US)." -ForegroundColor Yellow
     Write-Host "  If the ISO uses a different language, installation may require manual steps." -ForegroundColor Yellow
     Write-Host ""
@@ -983,7 +581,7 @@ function Main {
   Write-Log "Windows ISO: $isoPath" -Level "SUCCESS"
 
   # Warn if ISO language is unknown (local file or parameter-provided)
-  if (-not $script:selectedISOLanguage) {
+  if (-not (Get-SelectedISOLanguage)) {
     Write-Log "ISO language could not be determined. The bundled autounattend.xml is for English (en-US)." -Level "WARNING"
     if (-not $isNonInteractive) {
       Write-Host ""

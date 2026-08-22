@@ -6,15 +6,16 @@
 # ============================================================================
 # MakePCReady.ps1 — Console TUI App Installer
 # ============================================================================
-# Dot-sources lib\PCSetup.Common.psm1 for all shared logic.
+# Imports lib\PCSetup.Common.psm1 for all shared logic.
 # Only defines the collapsible-tree TUI selector; everything else is shared.
 # ============================================================================
 
-$script:logFile = $LogPath
-$script:logStartTime = Get-Date
-
-# Import shared module
+# Import shared module (must be imported BEFORE initializing module state)
 Import-Module -Force (Join-Path -Path $PSScriptRoot -ChildPath "lib\PCSetup.Common.psm1")
+
+# Hand the log path/start time to the module — Import-Module scopes are isolated,
+# so assigning $script:logFile here would be invisible to the module's functions.
+Initialize-PCSetupState -LogPath $LogPath -StartTime (Get-Date)
 
 # ============================================================================
 # Collapsible Tree TUI Selector

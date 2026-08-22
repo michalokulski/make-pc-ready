@@ -17,6 +17,8 @@ If hardware acceleration is not available, it falls back to TCG (software emulat
 | `autounattend.xml` | Unattended answer file (source config) |
 | `unattend.iso` | ISO-wrapped unattend file attached as a second CD-ROM (auto-created if missing) |
 
+ISO download/build logic (`Get-WindowsISOViaFido`, `Get-WindowsISOViaUUPDump`, `Invoke-FileDownload`) is shared with the Hyper-V script via `..\lib\VMCommon.psm1`. The QEMU script enables the Linux UUP runner (`uup_download_linux.sh`) when running on Linux.
+
 ## What This Replaces
 
 This folder provides a QEMU-based equivalent to the Hyper-V flow in `Testing-Hyper-V`.

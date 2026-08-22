@@ -12,6 +12,20 @@ $script:wingetPath = $null
 $script:installedCache = @{}
 $script:installedCachePrimed = $false
 
+function Initialize-PCSetupState {
+  # Entry scripts must call this instead of assigning $script: variables directly:
+  # Import-Module gives this module its own scope, so caller-side assignments to
+  # $script:logFile are NOT visible to functions defined here.
+  param(
+    [Parameter(Mandatory)]
+    [string]$LogPath,
+    [datetime]$StartTime = (Get-Date)
+  )
+
+  $script:logFile = $LogPath
+  $script:logStartTime = $StartTime
+}
+
 $script:logColors = @{
   "SUCCESS" = "Green"
   "INFO" = "White"

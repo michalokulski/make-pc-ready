@@ -11,6 +11,8 @@ Creates a fresh Windows VM in Hyper-V with fully unattended installation. Design
 | `autounattend.xml` | Unattended answer file — automates Windows setup (zero user interaction) |
 | `unattend.iso` | ISO-wrapped answer file attached as a second DVD drive to the VM |
 
+ISO download/build logic (`Get-WindowsISOViaFido`, `Get-WindowsISOViaUUPDump`) is shared with the QEMU script via `..\lib\VMCommon.psm1`.
+
 ## Prerequisites
 
 - **Windows 10/11** with Hyper-V enabled (`MakePCReady.ps1` can enable it)
