@@ -44,14 +44,11 @@ jobs:
         run: ./scripts/Build-ReleasePackages.ps1 -Version '${{ steps.version.outputs.version }}'
 
       - name: Create GitHub Release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $tag = "${{ steps.version.outputs.tag }}"
-          $prerelease = if ($tag -match '-(alpha|beta|rc|preview)') { '--prerelease' } else { '' }
-          gh release create $tag `
-            --title "MakePCReady $tag" `
-            --generate-notes `
-            $prerelease `
-            dist/*.zip
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: MakePCReady ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+          prerelease: ${{ contains(steps.version.outputs.tag, '-alpha') || contains(steps.version.outputs.tag, '-beta') || contains(steps.version.outputs.tag, '-rc') || contains(steps.version.outputs.tag, '-preview') }}
+          files: dist/*.zip
+          fail_on_unmatched_files: true
